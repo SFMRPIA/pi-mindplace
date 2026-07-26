@@ -161,6 +161,10 @@ $traverser->addVisitor(new class($relPath, $fileNodeId) extends NodeVisitorAbstr
                 $nsImports[$alias] = $fullName;
                 
                 $id = nodeId($this->relPath, $fullName);
+                if (!isset($GLOBALS['seenIds'][$id])) {
+                    $GLOBALS['seenIds'][$id] = true;
+                    $GLOBALS['nodes'][] = ['id' => $id, 'label' => $fullName, 'type' => 'namespace', 'sourceFile' => $this->relPath];
+                }
                 $edges[] = ['source' => $this->fileNodeId, 'target' => $id, 'relation' => 'imports', 'confidence' => 'EXTRACTED'];
             }
         }
@@ -173,6 +177,10 @@ $traverser->addVisitor(new class($relPath, $fileNodeId) extends NodeVisitorAbstr
                 $nsImports[$alias] = $fullName;
                 
                 $id = nodeId($this->relPath, $fullName);
+                if (!isset($GLOBALS['seenIds'][$id])) {
+                    $GLOBALS['seenIds'][$id] = true;
+                    $GLOBALS['nodes'][] = ['id' => $id, 'label' => $fullName, 'type' => 'namespace', 'sourceFile' => $this->relPath];
+                }
                 $edges[] = ['source' => $this->fileNodeId, 'target' => $id, 'relation' => 'imports', 'confidence' => 'EXTRACTED'];
             }
         }

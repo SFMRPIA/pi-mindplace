@@ -6,7 +6,9 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import Parser from "tree-sitter";
 // @ts-expect-error WASM
@@ -541,57 +543,34 @@ function extractGeneric(filePath: string, source: string, tree: Parser.Tree): Ex
 
 // ── PHP Regex Fallback (for files too large for tree-sitter) ────────────────
 
-function extractPhpFallback(filePath: string, source: string): ExtractionResult {
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-  const seenIds = new Set<string>();
-  const fileNodeId = nodeId(filePath, "file");
-  nodes.push({ id: fileNodeId, label: filePath, type: "file", sourceFile: filePath });
-  seenIds.add(fileNodeId);
+function extractPhpFallback(filePath: string, absPath: string): ExtractionResult {
+  const _filename = fileURLToPath(import.meta.url);
+  const _dirname = dirname(_filename);
+  const scriptPath = join(_dirname, "..", "bin", "php-extract.php");
+  const phpBinary = "D:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe";
 
-  // Strip string contents to avoid false positives
-  const stripped = source
-    .replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, "''")
-    .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, '""')
-    .replace(/\/\*.*?\*\//gs, "")
-    .replace(/\/\/[^\n]*/g, "");
+  try {
+    const stdout = execSync(
+      `"${phpBinary}" "${scriptPath}" "${absPath}"`,
+      { timeout: 10000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
+    );
 
-  const lines = stripped.split("\n");
-
-  // Extract class/interface/trait definitions
-  const classRe = /(?:^|\n)\s*(?:abstract\s+|final\s+|readonly\s+)?(?:class|interface|trait)\s+(\w+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = classRe.exec(stripped)) !== null) {
-    const name = m[1];
-    const lineNum = stripped.slice(0, m.index).split("\n").length;
-    const id = nodeId(filePath, name);
-    if (!seenIds.has(id)) {
-      seenIds.add(id);
-      nodes.push({ id, label: name, type: "class", sourceFile: filePath, sourceLocation: `L${lineNum}` });
-      edges.push({ source: fileNodeId, target: id, relation: "contains", confidence: "INFERRED" });
+    const data = JSON.parse(stdout);
+    if (data.error) {
+      return { nodes: [], edges: [] };
     }
+
+    return {
+      nodes: data.nodes as GraphNode[],
+      edges: data.edges as GraphEdge[],
+    };
+  } catch {
+    return { nodes: [], edges: [] };
   }
-
-  // Extract function/method definitions (including visibility modifiers on methods)
-  const funcRe = /\bfunction\s+(?:&\s*)?(\w+)\s*\(/g;
-  while ((m = funcRe.exec(stripped)) !== null) {
-    const name = m[1];
-    const lineNum = stripped.slice(0, m.index).split("\n").length;
-    const id = nodeId(filePath, name);
-    if (!seenIds.has(id)) {
-      seenIds.add(id);
-      nodes.push({ id, label: name, type: "function", sourceFile: filePath, sourceLocation: `L${lineNum}` });
-      edges.push({ source: fileNodeId, target: id, relation: "contains", confidence: "INFERRED" });
-    }
-  }
-
-      // Note: call edges not extracted for large files (tree-sitter parser limitation)
-  // Structural nodes (class, function) are extracted above.
-
-  return { nodes, edges };
 }
 
 // ── PHP Extraction ───────────────────────────────────────────────────────────
+// ── PHP Extraction ───────────────────────────────────────────────────────────// ── PHP Extraction ───────────────────────────────────────────────────────────// ── PHP Extraction ───────────────────────────────────────────────────────────
 
 function extractPhp(filePath: string, source: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
@@ -834,7 +813,7 @@ function extractFile(filePath: string, root: string): ExtractionResult {
   if (parseFailed) {
     // For PHP files that fail tree-sitter (large files), use regex fallback
     if (lang === "php") {
-      return extractPhpFallback(filePath, source);
+      return extractPhpFallback(filePath, absPath);
     }
     return { nodes: [], edges: [] };
   }

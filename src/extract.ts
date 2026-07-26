@@ -35,6 +35,8 @@ import Ruby from "tree-sitter-ruby";
 import Kotlin from "tree-sitter-kotlin";
 // @ts-expect-error WASM
 import Scala from "tree-sitter-scala";
+// @ts-expect-error WASM
+import Php from "tree-sitter-php";
 
 import type { ExtractionResult, GraphEdge, GraphNode } from "./types.ts";
 import { CODE_EXTENSIONS } from "./types.ts";
@@ -55,6 +57,7 @@ const GRAMMARS: Record<string, { grammar: Parser.Language; exts: Set<string> }> 
   ruby: { grammar: Ruby as unknown as Parser.Language, exts: new Set([".rb"]) },
   kotlin: { grammar: Kotlin as unknown as Parser.Language, exts: new Set([".kt", ".kts"]) },
   scala: { grammar: Scala as unknown as Parser.Language, exts: new Set([".scala", ".sc"]) },
+  php: { grammar: Php.php as unknown as Parser.Language, exts: new Set([".php", ".phtml"]) },
 };
 
 // ── SHA256 Cache ──────────────────────────────────────────────────────────────
@@ -577,6 +580,7 @@ function extractFile(filePath: string, root: string): ExtractionResult {
       return extractBash(filePath, source, root);
     case "json":
       return extractJson(filePath, source, root);
+    case "php":
     case "java":
     case "rust":
     case "cpp":

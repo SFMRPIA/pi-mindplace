@@ -92,6 +92,9 @@ export const CODE_EXTENSIONS: Record<string, string> = {
   // Scala
   ".scala": "scala",
   ".sc": "scala",
+  // PHP
+  ".php": "php",
+  ".phtml": "php",
 };
 
 /** File extensions that may contain useful info but aren't parsed as code */

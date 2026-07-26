@@ -10,6 +10,7 @@ import { CODE_EXTENSIONS } from "./types.ts";
 
 const DEFAULT_IGNORE = new Set([
   "node_modules",
+  "vendor",
   ".git",
   ".pi",
   "dist",

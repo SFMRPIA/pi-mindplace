@@ -24,13 +24,34 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
   // Only run if this looks like a Laravel project
   if (!existsSync(join(root, "artisan"))) return { nodes, edges };
 
+  // Try common PHP binary paths
+  const phpCandidates = [
+    "php",
+    "/usr/bin/php",
+    "/usr/local/bin/php",
+    "D:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
+    "C:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
+    "D:/laragon/bin/php/php-8.3.0-Win32-vs16-x64/php.exe",
+  ];
+
+  // Find the PHP binary that works
+  let phpBin = "php";
+  for (const candidate of phpCandidates) {
+    try {
+      execSync(`"${candidate}" -v`, { timeout: 3000, encoding: "utf-8", windowsHide: true });
+      phpBin = candidate;
+      break;
+    } catch { /* try next */ }
+  }
+
   let stdout: string;
   try {
-    stdout = execSync(`php artisan route:list --json 2>/dev/null`, {
+    stdout = execSync(`"${phpBin}" artisan route:list --json`, {
       cwd: root,
       timeout: 15000,
       encoding: "utf-8",
       maxBuffer: 5 * 1024 * 1024,
+      windowsHide: true,
     });
   } catch {
     return { nodes, edges };  // artisan not available, skip

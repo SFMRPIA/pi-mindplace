@@ -63,25 +63,34 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
   const detected = detect(cwd);
   if (detected.files.length === 0) return { refreshed: false, reason: "no supported files" };
 
-  if (exists && !isStale(cwd, detected)) {
-    return { refreshed: false };  // Already fresh
-  }
-
-  // No graph or stale — rebuild
   try {
-    const cacheDir = join(cwd, OUT_DIR, "cache");
-    const extResult = extract(cwd, detected.files, cacheDir, false);
-
     let kg: KnowledgeGraph;
-    if (exists) {
+    let reason: string;
+
+    if (exists && !isStale(cwd, detected)) {
+      // Graph is fresh — load it and only update routes
       const existing = JSON.parse(readFileSync(gp, "utf-8"));
       kg = KnowledgeGraph.fromJSON(existing);
-      kg.merge(extResult);
+      reason = "routes only";
     } else {
-      kg = KnowledgeGraph.fromExtraction(extResult);
+      // No graph or stale — rebuild from files
+      const cacheDir = join(cwd, OUT_DIR, "cache");
+      const extResult = extract(cwd, detected.files, cacheDir, false);
+
+      if (exists) {
+        const existing = JSON.parse(readFileSync(gp, "utf-8"));
+        kg = KnowledgeGraph.fromJSON(existing);
+        kg.merge(extResult);
+      } else {
+        kg = KnowledgeGraph.fromExtraction(extResult);
+      }
+
+      reason = exists
+        ? `incremental (${extResult.extracted} files re-extracted)`
+        : "initial build";
     }
 
-    // Add Laravel route nodes from artisan route:list
+    // Always refresh routes — they can change without source file changes
     const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);
     for (const n of routeResult.nodes) {
       if (!kg.nodes.has(n.id)) {
@@ -106,7 +115,6 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     mkdirSync(join(cwd, OUT_DIR), { recursive: true });
     writeFileSync(gp, JSON.stringify(kg.toJSON(), null, 2), "utf-8");
 
-    const reason = exists ? `incremental (${extResult.extracted} files re-extracted)` : "initial build";
     return { refreshed: true, reason };
   } catch (err) {
     return { refreshed: false, reason: `refresh failed: ${err}` };

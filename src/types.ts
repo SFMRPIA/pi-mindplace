@@ -19,6 +19,7 @@ export interface GraphEdge {
   relation: string;
   confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
   confidenceScore?: number;
+  callContext?: string;  // receiver expression for call edges: "$this->prop", "ClassName", "$this", or omitted
 }
 
 export interface ExtractionResult {

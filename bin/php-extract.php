@@ -122,9 +122,55 @@ function addNode(string $name, string $type, int $line, ?string $parentId = null
     return $id;
 }
 
-function addEdge(string $source, string $target, string $relation): void {
+function addEdge(string $source, string $target, string $relation, ?string $callContext = null): void {
     global $edges;
-    $edges[] = ['source' => $source, 'target' => $target, 'relation' => $relation, 'confidence' => 'EXTRACTED'];
+    $edge = ['source' => $source, 'target' => $target, 'relation' => $relation, 'confidence' => 'EXTRACTED'];
+    if ($callContext !== null) {
+        $edge['callContext'] = $callContext;
+    }
+    $edges[] = $edge;
+}
+
+/**
+ * Convert a PHP-Parser expression node to a string representation
+ * for use as callContext on method call edges.
+ * E.g. $this->storeService → "$this->storeService"
+ */
+function getReceiverExpr(PhpParser\Node\Expr $expr): string {
+    // Variable: $this, $service
+    if ($expr instanceof PhpParser\Node\Expr\Variable) {
+        return is_string($expr->name) ? '$' . $expr->name : (string)$expr->name;
+    }
+    // Property fetch: $this->storeService, $service->client
+    if ($expr instanceof PhpParser\Node\Expr\PropertyFetch) {
+        $var = getReceiverExpr($expr->var);
+        $prop = $expr->name instanceof PhpParser\Node\Identifier ? $expr->name->name : (string)$expr->name;
+        return $var . '->' . $prop;
+    }
+    // Array dim fetch: $arr[key] -> method()
+    if ($expr instanceof PhpParser\Node\Expr\ArrayDimFetch) {
+        $var = getReceiverExpr($expr->var);
+        return $var . '[' . ($expr->dim ? getReceiverExpr($expr->dim) : '') . ']';
+    }
+    // Static property fetch: ClassName::$prop
+    if ($expr instanceof PhpParser\Node\Expr\StaticPropertyFetch) {
+        $class = $expr->class instanceof PhpParser\Node\Name ? $expr->class->getLast() : (string)$expr->class;
+        $prop = '$' . ($expr->name instanceof PhpParser\Node\Identifier ? $expr->name->name : (string)$expr->name);
+        return $class . '::' . $prop;
+    }
+    // Method chain: $a->b->c — keep the chain going
+    if ($expr instanceof PhpParser\Node\Expr\MethodCall) {
+        $var = getReceiverExpr($expr->var);
+        $name = $expr->name instanceof PhpParser\Node\Identifier ? $expr->name->name : (string)$expr->name;
+        return $var . '->' . $name;
+    }
+    // String literal
+    if ($expr instanceof PhpParser\Node\Scalar\String_) {
+        return "'" . $expr->value . "'";
+    }
+    // Fallback: use class name to indicate unknown expression type
+    $classParts = explode('\\', get_class($expr));
+    return end($classParts);
 }
 
 // First pass: collect namespace and use statements
@@ -281,7 +327,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
                     $name = $node->name->name ?? (string)$node->name;
                     $class = $node->class instanceof Node\Name ? $node->class->getLast() : (string)$node->class;
                     if ($name && $class !== 'parent' && $class !== 'self' && $class !== 'static') {
-                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls');
+                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls', $class);
                     }
                 }
                 
@@ -289,7 +335,8 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
                 if ($node instanceof Node\Expr\MethodCall) {
                     $name = $node->name->name ?? (string)$node->name;
                     if ($name) {
-                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls');
+                        $ctx = getReceiverExpr($node->var);
+                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls', $ctx);
                     }
                 }
                 

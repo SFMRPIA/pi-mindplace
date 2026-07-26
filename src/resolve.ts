@@ -12,7 +12,7 @@
  * - Other → leave unresolved
  */
 
-import type { KnowledgeGraph, GraphNode } from "./types.ts";
+import type { KnowledgeGraph } from "./types.ts";
 import type { ClassIndex } from "./class-index.ts";
 import { resolveShortName } from "./class-index.ts";
 
@@ -22,6 +22,14 @@ import { resolveShortName } from "./class-index.ts";
  * Returns the count of resolved edges.
  */
 export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
+  // Pre-build a label→id index for all method nodes to avoid O(n) scans
+  const methodLabelIndex = new Map<string, string>();
+  for (const [nodeId, node] of kg.nodes) {
+    if (node.type === "method") {
+      methodLabelIndex.set(node.label, nodeId);
+    }
+  }
+
   let resolved = 0;
 
   for (const edge of kg.edges) {
@@ -50,13 +58,11 @@ export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
     let resolvedClass: string | null = null;
 
     if (!ctx) {
-      // No context — can't do cross-file resolution. Leave as-is.
       continue;
     }
 
     if (ctx === "$this") {
-      // $this->method() — same class (edge already points to this class's method)
-      // No retargeting needed
+      // $this->method() — same class, already correct
       continue;
     }
 
@@ -71,19 +77,16 @@ export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
       // Static call: ClassName::method() — ctx is the class name
       resolvedClass = resolveToClass(ctx, ci, index);
     }
-    // Other contexts ($var, FuncCall, etc.) — not yet resolvable
 
     if (resolvedClass) {
-      // Find the target method node in the graph
       const targetLabel = resolvedClass + "." + methodName;
-      const methodNode = findMethodNode(kg, targetLabel);
+      const methodId = methodLabelIndex.get(targetLabel);
 
-      if (methodNode) {
-        edge.target = methodNode.id;
+      if (methodId) {
+        edge.target = methodId;
         resolved++;
       } else {
-        // Create a placeholder node for the resolved target
-        // (shouldn't happen often, but handle gracefully)
+        // Create a placeholder node if the method doesn't exist in graph
         const targetFile = index.classes.get(resolvedClass)?.file ?? "";
         const newId = nodeIdFromLabel(resolvedClass, methodName);
         if (!kg.nodes.has(newId)) {
@@ -94,6 +97,7 @@ export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
             sourceFile: targetFile,
           });
           kg.adjacency.set(newId, new Set());
+          methodLabelIndex.set(targetLabel, newId);
         }
         edge.target = newId;
         resolved++;
@@ -129,16 +133,6 @@ function resolveToClass(
   }
 
   return null;
-}
-
-/** Find a method node by its label (e.g. "GrabMartStoreService.pauseStore") */
-function findMethodNode(kg: KnowledgeGraph, label: string): GraphNode | undefined {
-  for (const [, node] of kg.nodes) {
-    if (node.type === "method" && node.label === label) {
-      return node;
-    }
-  }
-  return undefined;
 }
 
 /** Generate a stable node ID for a resolved method */

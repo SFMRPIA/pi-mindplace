@@ -9,6 +9,7 @@ import { detect } from "../detect.ts";
 import { extract } from "../extract.ts";
 import { KnowledgeGraph } from "../graph.ts";
 import { extractRoutes } from "../routes.ts";
+import { buildSearchIndex } from "../search.ts";
 import { generateReport } from "../report.ts";
 import { generateHtml } from "../viz.ts";
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
@@ -103,7 +104,10 @@ export const MindplaceBuildTool = {
         }
       }
 
-      // Step 5: Analyze
+      // Step 5: Build FTS5 search index
+      buildSearchIndex(root, kg);
+
+      // Step 6: Analyze
       kg.computeCentrality();
       kg.detectCommunities();
       const stats = kg.stats();

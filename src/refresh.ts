@@ -6,6 +6,7 @@ import type { DetectResult } from "./types.ts";
 import { extract } from "./extract.ts";
 import { KnowledgeGraph } from "./graph.ts";
 import { extractRoutes } from "./routes.ts";
+import { buildSearchIndex } from "./search.ts";
 
 const OUT_DIR = "graph-out";
 const MAX_STALE_CHECK_FILES = 100;
@@ -89,6 +90,9 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
         ? `incremental (${extResult.extracted} files re-extracted)`
         : "initial build";
     }
+
+    // Build FTS5 search index
+    buildSearchIndex(cwd, kg);
 
     // Always refresh routes — they can change without source file changes
     const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);

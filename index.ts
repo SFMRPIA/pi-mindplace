@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { MindplaceBuildTool } from "./src/tools/mindplace-build.ts";
 import { MindplaceQueryTool } from "./src/tools/mindplace-query.ts";
 import { MindplaceExplainTool } from "./src/tools/mindplace-explain.ts";
+import { MindplaceSearchTool } from "./src/tools/mindplace-search.ts";
 import { KnowledgeGraph } from "./src/graph.ts";
 
 const OUT_DIR = "graph-out";
@@ -126,6 +127,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(MindplaceBuildTool);
   pi.registerTool(MindplaceQueryTool);
   pi.registerTool(MindplaceExplainTool);
+  pi.registerTool(MindplaceSearchTool);
 
   // When graph exists: inject query-first instructions + always-on file map.
   // When no graph: tell agent to auto-build before reading files.

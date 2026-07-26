@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { KnowledgeGraph } from "../graph.ts";
 import { query, formatQueryResult } from "../query.ts";
+import { refreshGraphIfStale } from "../refresh.ts";
 
 const OUT_DIR = "graph-out";
 
@@ -45,6 +46,9 @@ export const MindplaceQueryTool = {
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
+    // Auto-refresh graph if stale before querying
+    await refreshGraphIfStale(ctx.cwd);
+
     const graphPath = join(ctx.cwd, OUT_DIR, "graph.json");
 
     if (!existsSync(graphPath)) {
@@ -52,7 +56,7 @@ export const MindplaceQueryTool = {
         content: [
           {
             type: "text" as const,
-            text: `No knowledge graph found. Run mindplace_build first to scan the codebase.`,
+            text: `No knowledge graph found. Pi-mindplace attempted to build it automatically but failed. Try running mindplace_build manually.`,
           },
         ],
         details: { graphExists: false },

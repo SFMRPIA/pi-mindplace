@@ -30,6 +30,9 @@ export const MindplaceExplainTool = {
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
+    // Auto-refresh graph if stale before explaining
+    await refreshGraphIfStale(ctx.cwd);
+
     const graphPath = join(ctx.cwd, OUT_DIR, "graph.json");
 
     if (!existsSync(graphPath)) {

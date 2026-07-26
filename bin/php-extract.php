@@ -195,6 +195,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
     private $fileNodeId;
     private $nsImports;
     private $currentClassId = null;
+    private $currentClassName = '';
     private $currentMethodId = null;
     
     public function __construct($relPath, $fileNodeId, &$nsImports) {
@@ -214,6 +215,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
             
             $id = addNode($name, $type, $node->getStartLine());
             $this->currentClassId = $id;
+            $this->currentClassName = $name;
             
             // Extends
             if (isset($node->extends) && $node->extends) {
@@ -235,12 +237,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
         // Method
         if ($node instanceof Node\Stmt\ClassMethod) {
             $name = $node->name->name;
-            $className = '';
-            $parent = $node->getAttribute('parent');
-            if ($parent instanceof Node\Stmt\ClassLike && $parent->name) {
-                $className = $parent->name->name;
-            }
-            $methodLabel = $className ? "{$className}.{$name}" : $name;
+            $methodLabel = $this->currentClassName ? "{$this->currentClassName}.{$name}" : $name;
             $id = addNode($methodLabel, 'method', $node->getStartLine(), $this->currentClassId);
             $this->currentMethodId = $id;
             
@@ -323,6 +320,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
     public function leaveNode(Node $node) {
         if ($node instanceof Node\Stmt\ClassLike) {
             $this->currentClassId = null;
+            $this->currentClassName = '';
         }
         if ($node instanceof Node\Stmt\ClassMethod || $node instanceof Node\Stmt\Function_) {
             $this->currentMethodId = null;

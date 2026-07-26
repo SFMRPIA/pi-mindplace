@@ -543,7 +543,7 @@ function extractGeneric(filePath: string, source: string, tree: Parser.Tree): Ex
 
 // ── PHP Regex Fallback (for files too large for tree-sitter) ────────────────
 
-function extractPhpFallback(filePath: string, absPath: string): ExtractionResult {
+function extractPhpViaSubprocess(filePath: string, absPath: string): ExtractionResult {
   const _filename = fileURLToPath(import.meta.url);
   const _dirname = dirname(_filename);
   const scriptPath = join(_dirname, "..", "bin", "php-extract.php");
@@ -813,7 +813,7 @@ function extractFile(filePath: string, root: string): ExtractionResult {
   if (parseFailed) {
     // For PHP files that fail tree-sitter (large files), use regex fallback
     if (lang === "php") {
-      return extractPhpFallback(filePath, absPath);
+      return extractPhpViaSubprocess(filePath, absPath);
     }
     return { nodes: [], edges: [] };
   }
@@ -832,7 +832,15 @@ function extractFile(filePath: string, root: string): ExtractionResult {
     case "json":
       return extractJson(filePath, source, root);
     case "php":
-      return extractPhp(filePath, source, tree);
+      // Dual-pass: tree-sitter for structure (fast) + PHP-Parser for calls/imports (accurate)
+      const tsResult = extractPhp(filePath, source, tree);
+      const ppResult = extractPhpViaSubprocess(filePath, absPath);
+      // Keep tree-sitter nodes, but replace call/import edges with PHP-Parser's (more accurate)
+      const mergedEdges = [
+        ...tsResult.edges.filter(e => e.relation !== "calls" && e.relation !== "imports"),
+        ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports"),
+      ];
+      return { nodes: tsResult.nodes, edges: mergedEdges };
     case "java":
     case "rust":
     case "cpp":

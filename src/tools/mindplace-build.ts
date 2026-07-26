@@ -8,6 +8,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { detect } from "../detect.ts";
 import { extract } from "../extract.ts";
 import { KnowledgeGraph } from "../graph.ts";
+import { extractRoutes } from "../routes.ts";
 import { generateReport } from "../report.ts";
 import { generateHtml } from "../viz.ts";
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
@@ -83,7 +84,26 @@ export const MindplaceBuildTool = {
         kg = KnowledgeGraph.fromExtraction(extResult, params.directed);
       }
 
-      // Step 4: Analyze
+      // Step 4: Add Laravel route nodes
+      const routeResult = extractRoutes(root, [...kg.nodes.values()]);
+      for (const n of routeResult.nodes) {
+        if (!kg.nodes.has(n.id)) {
+          kg.nodes.set(n.id, { ...n, centrality: 0 });
+          kg.adjacency.set(n.id, new Set());
+        }
+      }
+      for (const e of routeResult.edges) {
+        if (kg.nodes.has(e.source) && kg.nodes.has(e.target)) {
+          kg.edges.push({ ...e });
+          kg.adjacency.get(e.source)?.add(e.target);
+          kg.adjacency.get(e.target)?.add(e.source);
+          const out = kg.outgoing.get(e.source) ?? new Set();
+          out.add(e.target);
+          kg.outgoing.set(e.source, out);
+        }
+      }
+
+      // Step 5: Analyze
       kg.computeCentrality();
       kg.detectCommunities();
       const stats = kg.stats();

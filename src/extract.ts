@@ -96,7 +96,7 @@ function saveCache(cacheDir: string, cache: Map<string, CacheEntry>): void {
 
 // ── Node ID helpers ───────────────────────────────────────────────────────────
 
-function nodeId(file: string, name: string): string {
+export function nodeId(file: string, name: string): string {
   const clean = file.replace(/[\\/]/g, "_").replace(/\.[^.]+$/, "");
   const safeName = name.replace(/[^a-zA-Z0-9_$]/g, "_");
   return `${clean}_${safeName}`;

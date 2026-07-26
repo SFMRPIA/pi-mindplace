@@ -5,6 +5,7 @@ import { detect } from "./detect.ts";
 import type { DetectResult } from "./types.ts";
 import { extract } from "./extract.ts";
 import { KnowledgeGraph } from "./graph.ts";
+import { extractRoutes } from "./routes.ts";
 
 const OUT_DIR = "graph-out";
 const MAX_STALE_CHECK_FILES = 100;
@@ -78,6 +79,25 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
       kg.merge(extResult);
     } else {
       kg = KnowledgeGraph.fromExtraction(extResult);
+    }
+
+    // Add Laravel route nodes from artisan route:list
+    const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);
+    for (const n of routeResult.nodes) {
+      if (!kg.nodes.has(n.id)) {
+        kg.nodes.set(n.id, { ...n, centrality: 0 });
+        kg.adjacency.set(n.id, new Set());
+      }
+    }
+    for (const e of routeResult.edges) {
+      if (kg.nodes.has(e.source) && kg.nodes.has(e.target)) {
+        kg.edges.push({ ...e });
+        kg.adjacency.get(e.source)?.add(e.target);
+        kg.adjacency.get(e.target)?.add(e.source);
+        const out = kg.outgoing.get(e.source) ?? new Set();
+        out.add(e.target);
+        kg.outgoing.set(e.source, out);
+      }
     }
 
     kg.computeCentrality();

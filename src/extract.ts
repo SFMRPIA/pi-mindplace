@@ -835,12 +835,21 @@ function extractFile(filePath: string, root: string): ExtractionResult {
       // Dual-pass: tree-sitter for structure (fast) + PHP-Parser for calls/imports (accurate)
       const tsResult = extractPhp(filePath, source, tree);
       const ppResult = extractPhpViaSubprocess(filePath, absPath);
-      // Keep tree-sitter nodes, but replace call/import edges with PHP-Parser's (more accurate)
+      // Keep tree-sitter nodes AND PHP-Parser nodes (for call edge target resolution)
+      const mergedNodes = [...tsResult.nodes];
+      const seenNodeIds = new Set(tsResult.nodes.map(n => n.id));
+      for (const n of ppResult.nodes) {
+        if (!seenNodeIds.has(n.id)) {
+          mergedNodes.push(n);
+          seenNodeIds.add(n.id);
+        }
+      }
+      // Replace call/import edges with PHP-Parser's (more accurate, includes callContext)
       const mergedEdges = [
         ...tsResult.edges.filter(e => e.relation !== "calls" && e.relation !== "imports"),
         ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports"),
       ];
-      return { nodes: tsResult.nodes, edges: mergedEdges };
+      return { nodes: mergedNodes, edges: mergedEdges };
     case "java":
     case "rust":
     case "cpp":

@@ -132,6 +132,25 @@ function addEdge(string $source, string $target, string $relation, ?string $call
 }
 
 /**
+ * Ensure a node exists in the output. Used to create call-target placeholder
+ * nodes so that kg.merge() doesn't drop call edges.
+ */
+function addNodeIfMissing(string $name, string $type, int $line): string {
+    global $relPath, $nodes, $fileNodeId, $seenIds;
+    $id = nodeId($relPath, $name);
+    if (isset($seenIds[$id])) return $id;
+    $seenIds[$id] = true;
+    $nodes[] = [
+        'id' => $id,
+        'label' => $name,
+        'type' => $type,
+        'sourceFile' => $relPath,
+        'sourceLocation' => $line > 0 ? "L{$line}" : null,
+    ];
+    return $id;
+}
+
+/**
  * Convert a PHP-Parser expression node to a string representation
  * for use as callContext on method call edges.
  * E.g. $this->storeService → "$this->storeService"
@@ -322,12 +341,20 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
             }
             
             public function enterNode(Node $node) {
+                // Helper: ensure target node exists, then add edge
+                $addCallEdge = function(string $targetName, string $relation = 'calls', ?string $callContext = null) {
+                    $targetId = nodeId($this->relPath, $targetName);
+                    // Ensure the target node exists so merge doesn't drop the edge
+                    addNodeIfMissing($targetName, 'call', 0);
+                    addEdge($this->sourceId, $targetId, $relation, $callContext);
+                };
+
                 // Static calls: ClassName::method()
                 if ($node instanceof Node\Expr\StaticCall) {
                     $name = $node->name->name ?? (string)$node->name;
                     $class = $node->class instanceof Node\Name ? $node->class->getLast() : (string)$node->class;
                     if ($name && $class !== 'parent' && $class !== 'self' && $class !== 'static') {
-                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls', $class);
+                        $addCallEdge($name, 'calls', $class);
                     }
                 }
                 
@@ -336,7 +363,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
                     $name = $node->name->name ?? (string)$node->name;
                     if ($name) {
                         $ctx = getReceiverExpr($node->var);
-                        addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls', $ctx);
+                        $addCallEdge($name, 'calls', $ctx);
                     }
                 }
                 
@@ -345,7 +372,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
                     if ($node->name instanceof Node\Name) {
                         $name = $node->name->getLast();
                         if ($name) {
-                            addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls');
+                            $addCallEdge($name, 'calls');
                         }
                     }
                 }
@@ -355,7 +382,7 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
                     if ($node->class instanceof Node\Name) {
                         $name = $node->class->getLast();
                         if ($name && $name !== 'static') {
-                            addEdge($this->sourceId, nodeId($this->relPath, $name), 'calls');
+                            $addCallEdge($name, 'calls');
                         }
                     }
                 }

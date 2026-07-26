@@ -91,11 +91,11 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
         : "initial build";
     }
 
-    // Build FTS5 search index
-    buildSearchIndex(cwd, kg);
-
     // Always refresh routes — they can change without source file changes
     const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);
+
+    // Build FTS5 search index (after routes are added)
+    buildSearchIndex(cwd, kg);
     for (const n of routeResult.nodes) {
       if (!kg.nodes.has(n.id)) {
         kg.nodes.set(n.id, { ...n, centrality: 0 });

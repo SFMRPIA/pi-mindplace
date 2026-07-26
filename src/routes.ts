@@ -34,11 +34,16 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
     "D:/laragon/bin/php/php-8.3.0-Win32-vs16-x64/php.exe",
   ];
 
-  // Find the PHP binary that works
+  // Find the PHP binary that works (suppress all output)
   let phpBin = "php";
   for (const candidate of phpCandidates) {
     try {
-      execSync(`"${candidate}" -v`, { timeout: 3000, encoding: "utf-8", windowsHide: true });
+      execSync(`"${candidate}" -v`, {
+        timeout: 3000,
+        encoding: "utf-8",
+        windowsHide: true,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
       phpBin = candidate;
       break;
     } catch { /* try next */ }
@@ -46,12 +51,13 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
 
   let stdout: string;
   try {
-    stdout = execSync(`"${phpBin}" artisan route:list --json`, {
+    stdout = execSync(`"${phpBin}" artisan route:list --json 2>nul`, {
       cwd: root,
       timeout: 15000,
       encoding: "utf-8",
       maxBuffer: 5 * 1024 * 1024,
       windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
     return { nodes, edges };  // artisan not available, skip

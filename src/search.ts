@@ -30,10 +30,12 @@ export function buildSearchIndex(cwd: string, kg: KnowledgeGraph): void {
       id, label, type, file, description,
       tokenize='porter unicode61'
     );
-    DELETE FROM symbols;
   `);
 
-  // Insert all nodes
+  // Wrap in transaction for fast bulk inserts
+  db.exec("BEGIN TRANSACTION");
+  db.exec("DELETE FROM symbols;");
+
   const insert = db.prepare(
     "INSERT INTO symbols (id, label, type, file, description) VALUES (?, ?, ?, ?, ?)"
   );
@@ -48,6 +50,7 @@ export function buildSearchIndex(cwd: string, kg: KnowledgeGraph): void {
     );
   }
 
+  db.exec("COMMIT");
   db.close();
 }
 

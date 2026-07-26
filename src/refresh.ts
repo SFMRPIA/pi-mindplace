@@ -2,41 +2,57 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "no
 import { join } from "node:path";
 
 import { detect } from "./detect.ts";
+import type { DetectResult } from "./types.ts";
 import { extract } from "./extract.ts";
 import { KnowledgeGraph } from "./graph.ts";
 
 const OUT_DIR = "graph-out";
+const MAX_STALE_CHECK_FILES = 100;
 
 function graphPath(cwd: string): string {
   return join(cwd, OUT_DIR, "graph.json");
 }
 
-function cacheDirPath(cwd: string): string {
-  return join(cwd, OUT_DIR, "cache");
-}
-
 /**
- * Check staleness using the SHA256 cache directory's mtime.
- * The cache updates whenever a file is re-extracted — so if any
- * cache entry is newer than the graph, the graph is stale.
- * O(1) — just 2 stat calls, no directory walk.
+ * Check staleness by comparing source file mtimes against graph mtime.
+ * Reuses the already-computed detect() result to avoid a second directory walk.
+ * Checks up to 100 files, prioritizing the most recently modified.
  */
-function isStale(cwd: string): boolean {
+function isStale(cwd: string, detected: DetectResult): boolean {
   const gp = graphPath(cwd);
   if (!existsSync(gp)) return true;
 
-  const cp = cacheDirPath(cwd);
-  if (!existsSync(cp)) return true;
-
   const graphMtime = statSync(gp).mtimeMs;
-  const cacheMtime = statSync(cp).mtimeMs;
 
-  return cacheMtime > graphMtime;
+  // Sort by newest first — the most likely to have changed
+  // Limit to MAX_STALE_CHECK_FILES to keep it fast
+  let checked = 0;
+  const files = detected.files
+    .map(f => ({ file: f, mtime: fsStatMtime(join(cwd, f)) }))
+    .filter((f): f is { file: string; mtime: number } => f.mtime !== -1)
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, MAX_STALE_CHECK_FILES);
+
+  for (const { mtime } of files) {
+    if (mtime > graphMtime) return true;
+    checked++;
+  }
+
+  return false;
+}
+
+/** Safe stat that returns -1 on error */
+function fsStatMtime(absPath: string): number {
+  try {
+    return statSync(absPath).mtimeMs;
+  } catch {
+    return -1;
+  }
 }
 
 /**
  * Refresh the graph if stale — silent auto-sync before queries.
- * Uses a single detect() call shared between staleness and refresh.
+ * Uses a single detect() call shared between staleness check and extraction.
  */
 export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boolean; reason?: string }> {
   const gp = graphPath(cwd);
@@ -46,13 +62,13 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
   const detected = detect(cwd);
   if (detected.files.length === 0) return { refreshed: false, reason: "no supported files" };
 
-  if (exists && !isStale(cwd)) {
+  if (exists && !isStale(cwd, detected)) {
     return { refreshed: false };  // Already fresh
   }
 
   // No graph or stale — rebuild
   try {
-    const cacheDir = cacheDirPath(cwd);
+    const cacheDir = join(cwd, OUT_DIR, "cache");
     const extResult = extract(cwd, detected.files, cacheDir, false);
 
     let kg: KnowledgeGraph;
@@ -76,3 +92,4 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     return { refreshed: false, reason: `refresh failed: ${err}` };
   }
 }
+

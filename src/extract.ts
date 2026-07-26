@@ -539,6 +539,58 @@ function extractGeneric(filePath: string, source: string, tree: Parser.Tree): Ex
   return { nodes, edges };
 }
 
+// ── PHP Regex Fallback (for files too large for tree-sitter) ────────────────
+
+function extractPhpFallback(filePath: string, source: string): ExtractionResult {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const seenIds = new Set<string>();
+  const fileNodeId = nodeId(filePath, "file");
+  nodes.push({ id: fileNodeId, label: filePath, type: "file", sourceFile: filePath });
+  seenIds.add(fileNodeId);
+
+  // Strip string contents to avoid false positives
+  const stripped = source
+    .replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, "''")
+    .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, '""')
+    .replace(/\/\*.*?\*\//gs, "")
+    .replace(/\/\/[^\n]*/g, "");
+
+  const lines = stripped.split("\n");
+
+  // Extract class/interface/trait definitions
+  const classRe = /(?:^|\n)\s*(?:abstract\s+|final\s+|readonly\s+)?(?:class|interface|trait)\s+(\w+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = classRe.exec(stripped)) !== null) {
+    const name = m[1];
+    const lineNum = stripped.slice(0, m.index).split("\n").length;
+    const id = nodeId(filePath, name);
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      nodes.push({ id, label: name, type: "class", sourceFile: filePath, sourceLocation: `L${lineNum}` });
+      edges.push({ source: fileNodeId, target: id, relation: "contains", confidence: "INFERRED" });
+    }
+  }
+
+  // Extract function/method definitions (including visibility modifiers on methods)
+  const funcRe = /\bfunction\s+(?:&\s*)?(\w+)\s*\(/g;
+  while ((m = funcRe.exec(stripped)) !== null) {
+    const name = m[1];
+    const lineNum = stripped.slice(0, m.index).split("\n").length;
+    const id = nodeId(filePath, name);
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      nodes.push({ id, label: name, type: "function", sourceFile: filePath, sourceLocation: `L${lineNum}` });
+      edges.push({ source: fileNodeId, target: id, relation: "contains", confidence: "INFERRED" });
+    }
+  }
+
+      // Note: call edges not extracted for large files (tree-sitter parser limitation)
+  // Structural nodes (class, function) are extracted above.
+
+  return { nodes, edges };
+}
+
 // ── PHP Extraction ───────────────────────────────────────────────────────────
 
 function extractPhp(filePath: string, source: string, tree: Parser.Tree): ExtractionResult {
@@ -709,39 +761,38 @@ function extractPhp(filePath: string, source: string, tree: Parser.Tree): Extrac
     const callees = new Set<string>();
 
     // Regular function calls: some_func(...)
+    // PHP: name is a direct child (type "name"), not a field — childForFieldName returns null
     for (const call of node.descendantsOfType("function_call_expression")) {
-      const nameNode = call.childForFieldName?.("name");
-      if (nameNode) {
-        const txt = nameNode.text;
-        // Skip namespaced calls like \App\Helpers::method() — those are scoped_call
+      const nameChild = call.children.find((c: Parser.SyntaxNode) => c.type === "name");
+      if (nameChild) {
+        const txt = nameChild.text;
         if (!txt.startsWith("\\")) callees.add(txt);
       }
     }
 
     // Method calls: $obj->method(...)
+    // PHP: direct children are [variable_name, name(method), arguments]
+    // Use direct children only — descendants would include argument names
     for (const call of node.descendantsOfType("member_call_expression")) {
-      // Get the method name (second `name` child)
-      const nameNodes = call.descendantsOfType("name");
-      if (nameNodes.length >= 2) {
-        callees.add(nameNodes[nameNodes.length - 1].text);
-      } else if (nameNodes.length === 1) {
-        callees.add(nameNodes[0].text);
+      const directName = call.children.find((c: Parser.SyntaxNode) => c.type === "name" && c !== call.firstChild);
+      if (directName) {
+        callees.add(directName.text);
       }
     }
 
     // Static calls: ClassName::method(...)
     for (const call of node.descendantsOfType("scoped_call_expression")) {
-      const nameNodes = call.descendantsOfType("name");
-      for (const n of nameNodes) {
+      const directNames = call.children.filter((c: Parser.SyntaxNode) => c.type === "name");
+      for (const n of directNames) {
         callees.add(n.text);
       }
     }
 
     // Object creation: new ClassName(...)
     for (const creation of node.descendantsOfType("object_creation_expression")) {
-      const nameNode = creation.childForFieldName?.("name");
-      if (nameNode && nameNode.text !== "static") {
-        callees.add(nameNode.text);
+      const nameChild = creation.children.find((c: Parser.SyntaxNode) => c.type === "name");
+      if (nameChild && nameChild.text !== "static") {
+        callees.add(nameChild.text);
       }
     }
 
@@ -770,15 +821,23 @@ function extractFile(filePath: string, root: string): ExtractionResult {
   const source = readFileSync(absPath, "utf-8");
 
   let tree: Parser.Tree;
+  let parseFailed = false;
   try {
     parser.setLanguage(grammar);
     tree = parser.parse(source);
   } catch {
-    // Tree-sitter parse error (corrupt file, unsupported syntax, etc.)
-    return { nodes: [], edges: [] };
+    parseFailed = true;
   }
 
   const lang = CODE_EXTENSIONS[filePath.slice(filePath.lastIndexOf("."))] ?? "unknown";
+
+  if (parseFailed) {
+    // For PHP files that fail tree-sitter (large files), use regex fallback
+    if (lang === "php") {
+      return extractPhpFallback(filePath, source);
+    }
+    return { nodes: [], edges: [] };
+  }
 
   switch (lang) {
     case "javascript":

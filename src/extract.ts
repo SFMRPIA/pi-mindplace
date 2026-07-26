@@ -539,6 +539,220 @@ function extractGeneric(filePath: string, source: string, tree: Parser.Tree): Ex
   return { nodes, edges };
 }
 
+// ── PHP Extraction ───────────────────────────────────────────────────────────
+
+function extractPhp(filePath: string, source: string, tree: Parser.Tree): ExtractionResult {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const seenIds = new Set<string>();
+  const fileNodeId = nodeId(filePath, "file");
+  nodes.push({ id: fileNodeId, label: filePath, type: "file", sourceFile: filePath });
+  seenIds.add(fileNodeId);
+
+  /** Extract description from preceding PHPDoc comment */
+  function getDocBlock(node: Parser.SyntaxNode): string | undefined {
+    const prev = node.previousNamedSibling;
+    if (prev?.type === "comment" && (prev.text.startsWith("/**") || prev.text.startsWith("//"))) {
+      return prev.text.replace(/^\/\*\*\s*/, "").replace(/\s*\*\/$/, "")
+        .replace(/\n\s*\*\s?/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+    }
+    return undefined;
+  }
+
+  function addNode(name: string, type: string, node: Parser.SyntaxNode, parentId?: string): string {
+    const id = nodeId(filePath, name);
+    if (seenIds.has(id)) return id;
+    seenIds.add(id);
+    const loc = `L${node.startPosition.row + 1}`;
+    nodes.push({
+      id, label: name, type, sourceFile: filePath, sourceLocation: loc,
+      description: getDocBlock(node),
+    });
+    const container = parentId ?? fileNodeId;
+    edges.push({ source: container, target: id, relation: "contains", confidence: "EXTRACTED" });
+    return id;
+  }
+
+  /** Add a calls edge for known callee pattern */
+  function addCall(sourceId: string, calleeText: string): void {
+    // Skip dynamic calls ($variable, $this, etc.)
+    if (calleeText.startsWith("$") || calleeText === "parent" || calleeText === "self" || calleeText === "static") return;
+    const targetId = nodeId(filePath, calleeText);
+    edges.push({ source: sourceId, target: targetId, relation: "calls", confidence: "INFERRED", confidenceScore: 0.85 });
+  }
+
+  function walk(node: Parser.SyntaxNode, context?: { currentClass?: string; currentMethod?: string }): void {
+    const t = node.type;
+    const ctx = context ?? {};
+
+    // ── Namespace ──────────────────────────────────────────────────────────
+    if (t === "namespace_definition") {
+      const nsName = node.childForFieldName?.("name")?.children
+        ?.filter((c: Parser.SyntaxNode) => c.type === "name")
+        ?.map((c: Parser.SyntaxNode) => c.text).join("\\") ?? "";
+      if (nsName) {
+        const nsId = nodeId(filePath, nsName);
+        if (!seenIds.has(nsId)) {
+          seenIds.add(nsId);
+          nodes.push({ id: nsId, label: nsName, type: "namespace", sourceFile: filePath });
+          edges.push({ source: fileNodeId, target: nsId, relation: "contains", confidence: "EXTRACTED" });
+        }
+      }
+      return;
+    }
+
+    // ── Namespace use (import) ──────────────────────────────────────────────
+    if (t === "namespace_use_declaration") {
+      const clause = node.childForFieldName?.("name") ?? node.firstNamedChild;
+      if (clause) {
+        // Extract all name parts
+        const names = clause.descendantsOfType("name");
+        for (const n of names) {
+          const txt = n.text;
+          if (txt && txt !== "function" && txt !== "const") {
+            edges.push({ source: fileNodeId, target: nodeId(filePath, txt), relation: "imports", confidence: "EXTRACTED" });
+          }
+        }
+      }
+      return;
+    }
+
+    // ── Class declaration ───────────────────────────────────────────────────
+    if (t === "class_declaration" || t === "interface_declaration" || t === "trait_declaration" || t === "enum_declaration") {
+      const name = node.childForFieldName?.("name")?.text ?? "Anonymous";
+      const kind = t === "interface_declaration" ? "interface" :
+                   t === "trait_declaration" ? "trait" :
+                   t === "enum_declaration" ? "enum" : "class";
+      const classId = addNode(name, kind, node);
+
+      // Inheritance: extends (base_clause)
+      for (const child of node.children) {
+        if (child.type === "base_clause") {
+          for (const ref of child.descendantsOfType("name")) {
+            if (ref.text !== "extends") {
+              edges.push({ source: classId, target: nodeId(filePath, ref.text), relation: "inherits", confidence: "EXTRACTED" });
+            }
+          }
+        }
+        // Inheritance: implements (class_interface_clause)
+        if (child.type === "class_interface_clause") {
+          for (const ref of child.descendantsOfType("name")) {
+            if (ref.text !== "implements") {
+              edges.push({ source: classId, target: nodeId(filePath, ref.text), relation: "implements", confidence: "EXTRACTED" });
+            }
+          }
+        }
+        // Trait use inside class
+        if (child.type === "use_declaration") {
+          for (const ref of child.descendantsOfType("name")) {
+            if (ref.text !== "use") {
+              edges.push({ source: classId, target: nodeId(filePath, ref.text), relation: "references", confidence: "EXTRACTED" });
+            }
+          }
+        }
+        // Walk body to find methods and properties
+        if (child.type === "declaration_list") {
+          for (const bodyChild of child.children) {
+            walk(bodyChild, { currentClass: name, currentMethod: undefined });
+          }
+        }
+      }
+      return;
+    }
+
+    // ── Method declaration ─────────────────────────────────────────────────
+    if (t === "method_declaration") {
+      const methodName = node.childForFieldName?.("name")?.text ?? "unknown";
+      const fullName = ctx.currentClass ? `${ctx.currentClass}.${methodName}` : methodName;
+      const methodId = addNode(fullName, "method", node);
+
+      // Find calls within this method
+      const calls = collectCalls(node);
+      for (const callee of calls) {
+        addCall(methodId, callee);
+      }
+      return;
+    }
+
+    // ── Function definition (global) ─────────────────────────────────────────
+    if (t === "function_definition") {
+      const funcName = node.childForFieldName?.("name")?.text ?? "anonymous";
+      // Skip closures / anonymous functions
+      if (funcName === "anonymous" || funcName === "{") {
+        for (const child of node.children) walk(child, ctx);
+        return;
+      }
+      const funcId = addNode(funcName, "function", node);
+
+      const calls = collectCalls(node);
+      for (const callee of calls) {
+        addCall(funcId, callee);
+      }
+      return;
+    }
+
+    // ── Property declaration ────────────────────────────────────────────────
+    if (t === "property_declaration") {
+      for (const child of node.children) {
+        if (child.type === "property_element") {
+          const propName = child.descendantsOfType("variable_name")[0]?.text ?? "unknown";
+          addNode(propName, "property", node);
+        }
+      }
+      return;
+    }
+
+    for (const child of node.children) walk(child, ctx);
+  }
+
+  /** Collect unique callee names from a function/method body */
+  function collectCalls(node: Parser.SyntaxNode): string[] {
+    const callees = new Set<string>();
+
+    // Regular function calls: some_func(...)
+    for (const call of node.descendantsOfType("function_call_expression")) {
+      const nameNode = call.childForFieldName?.("name");
+      if (nameNode) {
+        const txt = nameNode.text;
+        // Skip namespaced calls like \App\Helpers::method() — those are scoped_call
+        if (!txt.startsWith("\\")) callees.add(txt);
+      }
+    }
+
+    // Method calls: $obj->method(...)
+    for (const call of node.descendantsOfType("member_call_expression")) {
+      // Get the method name (second `name` child)
+      const nameNodes = call.descendantsOfType("name");
+      if (nameNodes.length >= 2) {
+        callees.add(nameNodes[nameNodes.length - 1].text);
+      } else if (nameNodes.length === 1) {
+        callees.add(nameNodes[0].text);
+      }
+    }
+
+    // Static calls: ClassName::method(...)
+    for (const call of node.descendantsOfType("scoped_call_expression")) {
+      const nameNodes = call.descendantsOfType("name");
+      for (const n of nameNodes) {
+        callees.add(n.text);
+      }
+    }
+
+    // Object creation: new ClassName(...)
+    for (const creation of node.descendantsOfType("object_creation_expression")) {
+      const nameNode = creation.childForFieldName?.("name");
+      if (nameNode && nameNode.text !== "static") {
+        callees.add(nameNode.text);
+      }
+    }
+
+    return [...callees];
+  }
+
+  walk(tree.rootNode);
+  return { nodes, edges };
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 function extractFile(filePath: string, root: string): ExtractionResult {
@@ -581,6 +795,7 @@ function extractFile(filePath: string, root: string): ExtractionResult {
     case "json":
       return extractJson(filePath, source, root);
     case "php":
+      return extractPhp(filePath, source, tree);
     case "java":
     case "rust":
     case "cpp":

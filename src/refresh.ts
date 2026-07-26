@@ -7,6 +7,8 @@ import { extract } from "./extract.ts";
 import { KnowledgeGraph } from "./graph.ts";
 import { extractRoutes } from "./routes.ts";
 import { buildSearchIndex } from "./search.ts";
+import { buildClassIndex, saveClassIndex } from "./class-index.ts";
+import { resolveCalls } from "./resolve.ts";
 
 const OUT_DIR = "graph-out";
 const MAX_STALE_CHECK_FILES = 100;
@@ -94,7 +96,12 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     // Always refresh routes — they can change without source file changes
     const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);
 
-    // Build FTS5 search index (after routes are added)
+    // Build class index and resolve cross-file calls
+    const classIndex = buildClassIndex(cwd, kg);
+    const resolvedCount = resolveCalls(kg, classIndex);
+    saveClassIndex(cwd, classIndex);
+
+    // Build FTS5 search index (after routes + resolved calls)
     buildSearchIndex(cwd, kg);
     for (const n of routeResult.nodes) {
       if (!kg.nodes.has(n.id)) {

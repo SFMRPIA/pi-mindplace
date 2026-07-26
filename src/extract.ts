@@ -605,13 +605,12 @@ function extractPhp(filePath: string, source: string, tree: Parser.Tree): Extrac
     if (t === "namespace_use_declaration") {
       const clause = node.childForFieldName?.("name") ?? node.firstNamedChild;
       if (clause) {
-        // Extract all name parts
-        const names = clause.descendantsOfType("name");
-        for (const n of names) {
-          const txt = n.text;
-          if (txt && txt !== "function" && txt !== "const") {
-            edges.push({ source: fileNodeId, target: nodeId(filePath, txt), relation: "imports", confidence: "EXTRACTED" });
-          }
+        // Join all name parts into the full namespace path (e.g. App\\Models\\Store)
+        const nameNodes = clause.descendantsOfType("name");
+        const parts = nameNodes.map((n: Parser.SyntaxNode) => n.text).filter((t: string) => t !== "function" && t !== "const");
+        if (parts.length > 0) {
+          const fullPath = parts.join("\\");
+          edges.push({ source: fileNodeId, target: nodeId(filePath, fullPath), relation: "imports", confidence: "EXTRACTED" });
         }
       }
       return;

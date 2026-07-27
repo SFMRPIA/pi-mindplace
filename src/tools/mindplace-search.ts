@@ -5,6 +5,7 @@
 import { Type } from "typebox";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { searchIndex, searchDbPath } from "../search.ts";
+import { refreshGraphIfStale } from "../refresh.ts";
 import { existsSync } from "node:fs";
 
 export const MindplaceSearchTool = {
@@ -37,6 +38,9 @@ export const MindplaceSearchTool = {
     ctx: ExtensionContext,
   ) {
     const root = params.path ?? ctx.cwd;
+
+    // Auto-refresh graph if stale (routes, new files, etc.)
+    await refreshGraphIfStale(root);
 
     if (!existsSync(searchDbPath(root))) {
       return {

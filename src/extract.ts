@@ -580,7 +580,13 @@ function extractPhp(filePath: string, source: string, tree: Parser.Tree): Extrac
   nodes.push({ id: fileNodeId, label: filePath, type: "file", sourceFile: filePath });
   seenIds.add(fileNodeId);
 
-  /** Extract description from preceding PHPDoc comment */
+  // ── Vue Extraction ────────────────────────────────────────────────────────────
+
+/**
+ * Extract symbols from a Vue Single File Component.
+ * Parses the <script> block with the JavaScript/TypeScript extractor.
+ */
+/** Extract description from preceding PHPDoc comment */
   function getDocBlock(node: Parser.SyntaxNode): string | undefined {
     const prev = node.previousNamedSibling;
     if (prev?.type === "comment" && (prev.text.startsWith("/**") || prev.text.startsWith("//"))) {
@@ -782,10 +788,87 @@ function extractPhp(filePath: string, source: string, tree: Parser.Tree): Extrac
   return { nodes, edges };
 }
 
+// ── Vue Extraction ────────────────────────────────────────────────────────────
+
+/**
+ * Extract symbols from a Vue Single File Component.
+ * Parses the <script> block with the JavaScript/TypeScript extractor.
+ */
+function extractVue(filePath: string, source: string, root: string): ExtractionResult {
+  // Extract script block content
+  const scriptMatch = source.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+  if (!scriptMatch) {
+    // No script block — just create a file node
+    return {
+      nodes: [{
+        id: nodeId(filePath, "file"),
+        label: filePath,
+        type: "file",
+        sourceFile: filePath,
+      }],
+      edges: [],
+    };
+  }
+
+  const scriptContent = scriptMatch[1].trim();
+  if (!scriptContent) {
+    return {
+      nodes: [{
+        id: nodeId(filePath, "file"),
+        label: filePath,
+        type: "file",
+        sourceFile: filePath,
+      }],
+      edges: [],
+    };
+  }
+
+  // Check if TypeScript
+  const isTS = /lang="ts"/.test(scriptMatch[0]);
+
+  // Set up the JavaScript (or TypeScript) parser
+  const jsParser = new Parser();
+  try {
+    if (isTS) {
+      jsParser.setLanguage(TsLang as unknown as Parser.Language);
+    } else {
+      jsParser.setLanguage(JavaScript as unknown as Parser.Language);
+    }
+  } catch {
+    return {
+      nodes: [{
+        id: nodeId(filePath, "file"),
+        label: filePath,
+        type: "file",
+        sourceFile: filePath,
+      }],
+      edges: [],
+    };
+  }
+
+  const scriptTree = jsParser.parse(scriptContent);
+
+  // Use the JS/TS extractor on the script content — pass the original filePath for consistent IDs
+  return extractJS_TS(filePath, scriptContent, root, scriptTree);
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 function extractFile(filePath: string, root: string): ExtractionResult {
   const absPath = resolve(root, filePath);
+  const lang = CODE_EXTENSIONS[filePath.slice(filePath.lastIndexOf("."))] ?? "unknown";
+
+  // Vue files: extract script block content (no tree-sitter grammar needed)
+  if (lang === "vue") {
+    try {
+      if (statSync(absPath).size > 1_000_000) return { nodes: [], edges: [] };
+    } catch {
+      return { nodes: [], edges: [] };
+    }
+    const source = readFileSync(absPath, "utf-8");
+    return extractVue(filePath, source, root);
+  }
+
   const grammar = pickGrammar(filePath);
   if (!grammar) return { nodes: [], edges: [] };
 
@@ -808,12 +891,14 @@ function extractFile(filePath: string, root: string): ExtractionResult {
     parseFailed = true;
   }
 
-  const lang = CODE_EXTENSIONS[filePath.slice(filePath.lastIndexOf("."))] ?? "unknown";
-
   if (parseFailed) {
     // For PHP files that fail tree-sitter (large files), use regex fallback
     if (lang === "php") {
       return extractPhpViaSubprocess(filePath, absPath);
+    }
+    // For Vue files, extract script block content
+    if (lang === "vue") {
+      return extractVue(filePath, source, root);
     }
     return { nodes: [], edges: [] };
   }

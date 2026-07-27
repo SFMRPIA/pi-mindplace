@@ -211,14 +211,32 @@ export const MindplaceImpactTool = {
     }
 
     // Build tree
-    const tree = buildDependencyTree(kg, targetNode.id, maxDepth, maxResults);
+    let tree = buildDependencyTree(kg, targetNode.id, maxDepth, maxResults);
 
     const lines: string[] = [];
     lines.push(`## Impact Analysis: ${tree.label}`);
     lines.push(`_${tree.type} @ ${tree.sourceFile ?? "unknown"}${tree.sourceLocation ? ":" + tree.sourceLocation : ""}_`);
     lines.push("");
 
-    if (tree.children.length === 0) {
+    // Class fallback: if no direct dependents, aggregate method-level dependents
+    if (tree.children.length === 0 && targetNode.type === "class") {
+      lines.push("No direct dependents on this class. Showing dependents of its methods:");
+      lines.push("");
+      let methodCount = 0;
+      for (const [, node] of kg.nodes) {
+        if (node.type === "method" && node.sourceFile === targetNode.sourceFile) {
+          const methodTree = buildDependencyTree(kg, node.id, maxDepth, maxResults);
+          if (methodTree.children.length > 0 && methodCount < 20) {
+            lines.push(`  ${node.label}:`);
+            formatTree(methodTree, lines, "    ");
+            methodCount++;
+          }
+        }
+      }
+      if (methodCount === 0) {
+        lines.push("No dependents found for any method in this class.");
+      }
+    } else if (tree.children.length === 0) {
       lines.push("No dependents found in the graph.");
     } else {
       formatTree(tree, lines, "");

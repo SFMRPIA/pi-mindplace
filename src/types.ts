@@ -96,6 +96,8 @@ export const CODE_EXTENSIONS: Record<string, string> = {
   // PHP
   ".php": "php",
   ".phtml": "php",
+  // Vue (script blocks extracted as JavaScript)
+  ".vue": "vue",
 };
 
 /** File extensions that may contain useful info but aren't parsed as code */

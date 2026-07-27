@@ -255,18 +255,32 @@ $traverser->traverse($ast);
 
 // Second pass: extract classes, methods, functions, calls
 $traverser2 = new NodeTraverser();
-$traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends NodeVisitorAbstract {
+$traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports, $currentNamespace) extends NodeVisitorAbstract {
     private $relPath;
     private $fileNodeId;
     private $nsImports;
+    private $currentNs;
     private $currentClassId = null;
     private $currentClassName = '';
     private $currentMethodId = null;
     
-    public function __construct($relPath, $fileNodeId, &$nsImports) {
+    public function __construct($relPath, $fileNodeId, &$nsImports, $currentNs) {
         $this->relPath = $relPath;
         $this->fileNodeId = $fileNodeId;
         $this->nsImports = &$nsImports;
+        $this->currentNs = $currentNs ?? '';
+    }
+    
+    /** Resolve a short class name to FQCN via file's use imports */
+    private function resolveName(string $short): string {
+        if (isset($this->nsImports[$short])) {
+            return $this->nsImports[$short];
+        }
+        // Also check current namespace + short name
+        if (!empty($this->currentNs)) {
+            return $this->currentNs . '\\' . $short;
+        }
+        return $short;
     }
     
     public function enterNode(Node $node) {
@@ -282,19 +296,23 @@ $traverser2->addVisitor(new class($relPath, $fileNodeId, $nsImports) extends Nod
             $this->currentClassId = $id;
             $this->currentClassName = $name;
             
-            // Extends
+            // Extends — resolve via imports to FQCN
             if (isset($node->extends) && $node->extends) {
-                $parentName = $node->extends instanceof Node\Name 
+                $parentShort = $node->extends instanceof Node\Name 
                     ? $node->extends->getLast() 
                     : (string)$node->extends;
-                addEdge($id, nodeId($this->relPath, $parentName), 'inherits');
+                $parentFqcn = $this->resolveName($parentShort);
+                addNodeIfMissing($parentFqcn, 'class', 0);
+                addEdge($id, nodeId($this->relPath, $parentFqcn), 'inherits');
             }
             
-            // Implements
+            // Implements — resolve via imports to FQCN
             if (isset($node->implements)) {
                 foreach ($node->implements as $iface) {
-                    $ifName = $iface instanceof Node\Name ? $iface->getLast() : (string)$iface;
-                    addEdge($id, nodeId($this->relPath, $ifName), 'implements');
+                    $ifShort = $iface instanceof Node\Name ? $iface->getLast() : (string)$iface;
+                    $ifFqcn = $this->resolveName($ifShort);
+                    addNodeIfMissing($ifFqcn, 'interface', 0);
+                    addEdge($id, nodeId($this->relPath, $ifFqcn), 'implements');
                 }
             }
         }

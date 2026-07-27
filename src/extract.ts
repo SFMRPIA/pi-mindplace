@@ -847,7 +847,7 @@ function extractFile(filePath: string, root: string): ExtractionResult {
       // Replace call/import edges with PHP-Parser's (more accurate, includes callContext)
       const mergedEdges = [
         ...tsResult.edges.filter(e => e.relation !== "calls" && e.relation !== "imports"),
-        ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports"),
+        ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports" || e.relation === "inherits" || e.relation === "implements"),
       ];
       return { nodes: mergedNodes, edges: mergedEdges };
     case "java":

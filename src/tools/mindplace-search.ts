@@ -14,6 +14,11 @@ export const MindplaceSearchTool = {
     "Full-text search across all code symbols (classes, methods, functions, routes) in the knowledge graph. Returns ranked results by relevance. More precise than grep for finding named symbols.",
   promptSnippet: "Search code symbols by name or description",
   parameters: Type.Object({
+    path: Type.Optional(
+      Type.String({
+        description: "Project root path. Defaults to cwd.",
+      }),
+    ),
     query: Type.String({
       description: "Search query — supports FTS5 syntax like prefix search (run*) and phrase search (\"user auth\")",
     }),
@@ -26,12 +31,14 @@ export const MindplaceSearchTool = {
   }),
   async execute(
     _toolCallId: string,
-    params: { query: string; limit?: number },
+    params: { path?: string; query: string; limit?: number },
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
-    if (!existsSync(searchDbPath(ctx.cwd))) {
+    const root = params.path ?? ctx.cwd;
+
+    if (!existsSync(searchDbPath(root))) {
       return {
         content: [
           {
@@ -43,7 +50,7 @@ export const MindplaceSearchTool = {
       };
     }
 
-    const results = searchIndex(ctx.cwd, params.query, params.limit ?? 20);
+    const results = searchIndex(root, params.query, params.limit ?? 20);
 
     if (results.length === 0) {
       return {

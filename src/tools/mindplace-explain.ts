@@ -20,21 +20,28 @@ export const MindplaceExplainTool = {
     "Get detailed information about a specific entity (function, class, module) in the codebase — its connections, where it's defined, and what it depends on.",
   promptSnippet: "Explain a code entity and its connections",
   parameters: Type.Object({
+    path: Type.Optional(
+      Type.String({
+        description: "Project root path. Defaults to cwd.",
+      }),
+    ),
     name: Type.String({
       description: "Name of the function, class, or module to explain",
     }),
   }),
   async execute(
     _toolCallId: string,
-    params: { name: string },
+    params: { path?: string; name: string },
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
-    // Auto-refresh graph if stale before explaining
-    await refreshGraphIfStale(ctx.cwd);
+    const root = params.path ?? ctx.cwd;
 
-    const graphPath = join(ctx.cwd, OUT_DIR, "graph.json");
+    // Auto-refresh graph if stale before explaining
+    await refreshGraphIfStale(root);
+
+    const graphPath = join(root, OUT_DIR, "graph.json");
 
     if (!existsSync(graphPath)) {
       return {

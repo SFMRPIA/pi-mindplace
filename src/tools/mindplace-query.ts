@@ -23,6 +23,11 @@ export const MindplaceQueryTool = {
     "Use mindplace_query FIRST when answering questions about the codebase structure, relationships between files/functions, or tracing data flow. Only read raw files after the graph has oriented you.",
   ],
   parameters: Type.Object({
+    path: Type.Optional(
+      Type.String({
+        description: "Project root path. Defaults to cwd.",
+      }),
+    ),
     question: Type.String({
       description: "Natural-language question about the codebase",
     }),
@@ -41,15 +46,17 @@ export const MindplaceQueryTool = {
   }),
   async execute(
     _toolCallId: string,
-    params: { question: string; budget?: number; minScore?: number },
+    params: { path?: string; question: string; budget?: number; minScore?: number },
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
-    // Auto-refresh graph if stale before querying
-    await refreshGraphIfStale(ctx.cwd);
+    const root = params.path ?? ctx.cwd;
 
-    const graphPath = join(ctx.cwd, OUT_DIR, "graph.json");
+    // Auto-refresh graph if stale before querying
+    await refreshGraphIfStale(root);
+
+    const graphPath = join(root, OUT_DIR, "graph.json");
 
     if (!existsSync(graphPath)) {
       return {

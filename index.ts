@@ -18,8 +18,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 
 import { MindplaceBuildTool } from "./src/tools/mindplace-build.ts";
 import { MindplaceQueryTool } from "./src/tools/mindplace-query.ts";
@@ -122,6 +122,50 @@ Once the graph is built, use \`mindplace_query\` / \`mindplace_explain\` before
 raw file reads.
 `;
 
+// ─── Reuse project detection from build tool ───────────────────────────
+function detectProjects(root: string): { name: string; path: string }[] {
+  const projects: { name: string; path: string }[] = [];
+  const seen = new Set<string>();
+
+  const hasRootComposer = existsSync(join(root, "composer.json"));
+  const hasRootArtisan = existsSync(join(root, "artisan"));
+  const hasRootPackage = existsSync(join(root, "package.json"));
+  if (hasRootComposer || hasRootPackage) {
+    projects.push({ name: basename(root), path: root });
+    seen.add(root);
+  }
+
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return projects;
+  }
+
+  for (const entry of entries) {
+    if (entry.startsWith(".") || entry === "node_modules" || entry === "vendor") continue;
+    const fullPath = join(root, entry);
+    let st;
+    try { st = statSync(fullPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+
+    const hasComposer = existsSync(join(fullPath, "composer.json"));
+    const hasArtisan = existsSync(join(fullPath, "artisan"));
+    const hasPackage = existsSync(join(fullPath, "package.json"));
+    const hasViteConfig =
+      existsSync(join(fullPath, "vite.config.js")) ||
+      existsSync(join(fullPath, "vite.config.ts"));
+
+    if ((hasComposer && hasArtisan) || (hasPackage && hasViteConfig)) {
+      if (!seen.has(fullPath)) {
+        projects.push({ name: entry, path: fullPath });
+        seen.add(fullPath);
+      }
+    }
+  }
+  return projects;
+}
+
 export default function (pi: ExtensionAPI) {
   // Register tools
   pi.registerTool(MindplaceBuildTool);
@@ -129,8 +173,10 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(MindplaceExplainTool);
   pi.registerTool(MindplaceSearchTool);
 
-  // When graph exists: inject query-first instructions + always-on file map.
-  // When no graph: tell agent to auto-build before reading files.
+  // ── before_agent_start: inject graph instructions ─────────────────
+  // When a graph exists at `graph-out/`, inject query-first instructions
+  // plus the always-on file map. Otherwise, detect monorepo sub-projects
+  // and provide targeted instructions.
   pi.on("before_agent_start", (event, ctx) => {
     const gp = graphPath(ctx.cwd);
 
@@ -141,11 +187,35 @@ export default function (pi: ExtensionAPI) {
         prompt += "\n" + fileMap;
       }
       return { systemPrompt: event.systemPrompt + prompt };
-    } else {
+    }
+
+    // No graph at root — check if this is a monorepo with sub-projects
+    const subProjects = detectProjects(ctx.cwd);
+    if (subProjects.length > 1) {
+      const projectList = subProjects.map(p => `  - \`${p.name}\``).join("\n");
       return {
-        systemPrompt: event.systemPrompt + NO_GRAPH_INSTRUCTIONS,
+        systemPrompt: event.systemPrompt + `
+## Mind Place Knowledge Graph (Monorepo)
+
+This is a monorepo with detected sub-projects:
+${projectList}
+
+Build a per-project graph before answering codebase questions:
+
+1. Run \`mindplace_build\` (with no path) — it auto-detects sub-projects
+   and builds a graph inside each one.
+2. Query with \`mindplace_query(path="${subProjects[0].name}")\` or
+   \`mindplace_query(path="${subProjects[1].name}")\` to target a specific
+   project's graph.
+3. Use \`mindplace_explain(path="...")\` and \`mindplace_search(path="...")\`
+   the same way.
+`,
       };
     }
+
+    return {
+      systemPrompt: event.systemPrompt + NO_GRAPH_INSTRUCTIONS,
+    };
   });
 
   // ═══════════════════════════════════════════════════════════════

@@ -25,6 +25,7 @@ import { MindplaceBuildTool } from "./src/tools/mindplace-build.ts";
 import { MindplaceQueryTool } from "./src/tools/mindplace-query.ts";
 import { MindplaceExplainTool } from "./src/tools/mindplace-explain.ts";
 import { MindplaceSearchTool } from "./src/tools/mindplace-search.ts";
+import { MindplaceImpactTool } from "./src/tools/mindplace-impact.ts";
 import { KnowledgeGraph } from "./src/graph.ts";
 
 const OUT_DIR = "graph-out";
@@ -172,6 +173,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(MindplaceQueryTool);
   pi.registerTool(MindplaceExplainTool);
   pi.registerTool(MindplaceSearchTool);
+  pi.registerTool(MindplaceImpactTool);
 
   // ── before_agent_start: inject graph instructions ─────────────────
   // When a graph exists at `graph-out/`, inject query-first instructions

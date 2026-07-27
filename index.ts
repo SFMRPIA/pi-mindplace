@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 
     if (existsSync(gp)) {
       const fileMap = buildFileContext(ctx.cwd);
-      const prompt = GRAPH_FIRST_INSTRUCTIONS;
+      let prompt = GRAPH_FIRST_INSTRUCTIONS;
       if (fileMap) {
         prompt += "\n" + fileMap;
       }

@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { KnowledgeGraph } from "../graph.ts";
 import type { GraphEdge } from "../types.ts";
+import { refreshGraphIfStale } from "../refresh.ts";
 
 const OUT_DIR = "graph-out";
 

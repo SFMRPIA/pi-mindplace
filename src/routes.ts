@@ -25,13 +25,9 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
   if (!existsSync(join(root, "artisan"))) return { nodes, edges };
 
   // Try common PHP binary paths
+  // PHP is registered in PATH via C:\php858 (PHP 8.5.8)
   const phpCandidates = [
     "php",
-    "/usr/bin/php",
-    "/usr/local/bin/php",
-    "D:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
-    "C:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
-    "D:/laragon/bin/php/php-8.3.0-Win32-vs16-x64/php.exe",
   ];
 
   // Find the PHP binary that works (suppress all output)

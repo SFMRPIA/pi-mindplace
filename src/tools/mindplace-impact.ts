@@ -115,10 +115,16 @@ function formatTree(node: DependencyNode, lines: string[], prefix: string): void
 }
 
 function findNodeByLabel(kg: KnowledgeGraph, label: string): GraphNode | undefined {
-  // Exact match first
+  // Exact match first (skip stubs — prefer class-qualified nodes)
+  const SKIP_STUBS = new Set(["call", "file", "field", "namespace"]);
+  let exactMatch: GraphNode | undefined;
   for (const [, node] of kg.nodes) {
-    if (node.label === label) return node;
+    if (node.label === label && !SKIP_STUBS.has(node.type)) {
+      exactMatch = node;
+      break;
+    }
   }
+  if (exactMatch) return exactMatch;
 
   // Partial match: prefer method nodes (which are class-qualified like "GrabMartStoreService.pauseStore")
   // over stub nodes (bare "pauseStore"). If the label contains a dot, it's class-qualified.

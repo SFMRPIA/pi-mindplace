@@ -7,6 +7,9 @@
  * Output: JSON with nodes and edges
  */
 
+error_reporting(0);
+ini_set('display_errors', '0');
+
 if ($argc < 2) {
     echo json_encode(['error' => 'Usage: php php-extract.php <file-path> [autoload-path]']);
     exit(1);

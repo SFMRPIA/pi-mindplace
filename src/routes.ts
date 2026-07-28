@@ -47,7 +47,7 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
   let stdout: string | null = null;
   for (const candidate of phpCandidates) {
     try {
-      stdout = execSync(`"${candidate}" artisan route:list --json`, {
+      stdout = execSync(`"${candidate}" -d error_reporting=0 artisan route:list --json`, {
         cwd: root, timeout: 15000, encoding: "utf-8", maxBuffer: 5 * 1024 * 1024,
       });
       break;  // first success

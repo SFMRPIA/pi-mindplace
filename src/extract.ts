@@ -846,7 +846,21 @@ function extractVue(filePath: string, source: string, root: string): ExtractionR
     };
   }
 
-  const scriptTree = jsParser.parse(scriptContent);
+  let scriptTree: Parser.Tree;
+  try {
+    scriptTree = jsParser.parse(scriptContent);
+  } catch {
+    // Tree-sitter C parser can crash on malformed script content
+    return {
+      nodes: [{
+        id: nodeId(filePath, "file"),
+        label: filePath,
+        type: "file",
+        sourceFile: filePath,
+      }],
+      edges: [],
+    };
+  }
 
   // Use the JS/TS extractor on the script content — pass the original filePath for consistent IDs
   return extractJS_TS(filePath, scriptContent, root, scriptTree);
@@ -917,10 +931,14 @@ function extractFile(filePath: string, root: string): ExtractionResult {
     case "json":
       return extractJson(filePath, source, root);
     case "php":
-      // Dual-pass: tree-sitter for structure (fast) + PHP-Parser for calls/imports (accurate)
       const tsResult = extractPhp(filePath, source, tree);
+      // PHP-Parser is expensive (~190ms per file). Skip for small files (<10KB)
+      // where tree-sitter handles structure and basic calls well enough.
+      if (source.length < 10_000) {
+        return tsResult;
+      }
+      // Dual-pass for larger files: tree-sitter (structure) + PHP-Parser (calls/imports)
       const ppResult = extractPhpViaSubprocess(filePath, absPath);
-      // Keep tree-sitter nodes AND PHP-Parser nodes (for call edge target resolution)
       const mergedNodes = [...tsResult.nodes];
       const seenNodeIds = new Set(tsResult.nodes.map(n => n.id));
       for (const n of ppResult.nodes) {
@@ -929,7 +947,6 @@ function extractFile(filePath: string, root: string): ExtractionResult {
           seenNodeIds.add(n.id);
         }
       }
-      // Replace call/import edges with PHP-Parser's (more accurate, includes callContext)
       const mergedEdges = [
         ...tsResult.edges.filter(e => e.relation !== "calls" && e.relation !== "imports"),
         ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports" || e.relation === "inherits" || e.relation === "implements"),

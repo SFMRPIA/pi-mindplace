@@ -24,18 +24,24 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
   // Only run if this looks like a Laravel project
   if (!existsSync(join(root, "artisan"))) return { nodes, edges };
 
-  // Try each PHP candidate — first one that runs artisan successfully wins
+  // Try "php" from PATH first. If artisan fails, scan common Laragon installs.
+  const LARAGON_ROOTS = [
+    process.env.LARAGON_DIR,
+    "D:/laragon",
+    "C:/laragon",
+    "E:/laragon",
+  ].filter(Boolean) as string[];
+
   const phpCandidates = [
     "php",
-    // Fallback: Laragon PHP installations
-    ...(() => {
+    ...LARAGON_ROOTS.flatMap(root => {
       try {
-        return readdirSync("D:/laragon/bin/php", { withFileTypes: true })
+        return readdirSync(`${root}/bin/php`, { withFileTypes: true })
           .filter(d => d.isDirectory() && d.name.startsWith("php-"))
-          .map(d => `D:/laragon/bin/php/${d.name}/php.exe`)
+          .map(d => `${root}/bin/php/${d.name}/php.exe`)
           .sort().reverse();
       } catch { return []; }
-    })(),
+    }),
   ];
 
   let stdout: string | null = null;

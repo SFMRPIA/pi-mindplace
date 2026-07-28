@@ -4,7 +4,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { GraphNode, GraphEdge } from "./types.ts";
 
@@ -24,35 +24,31 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
   // Only run if this looks like a Laravel project
   if (!existsSync(join(root, "artisan"))) return { nodes, edges };
 
-  // Find the PHP binary — check multiple common paths
-  // System PATH has PHP 8.5.8 but Laravel needs the project's PHP version
+  // Try each PHP candidate — first one that runs artisan successfully wins
   const phpCandidates = [
-    "D:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
-    "C:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe",
     "php",
+    // Fallback: Laragon PHP installations
+    ...(() => {
+      try {
+        return readdirSync("D:/laragon/bin/php", { withFileTypes: true })
+          .filter(d => d.isDirectory() && d.name.startsWith("php-"))
+          .map(d => `D:/laragon/bin/php/${d.name}/php.exe`)
+          .sort().reverse();
+      } catch { return []; }
+    })(),
   ];
 
-  let phpBin: string | null = null;
+  let stdout: string | null = null;
   for (const candidate of phpCandidates) {
     try {
-      execSync(`"${candidate}" -v`, { timeout: 3000, encoding: "utf-8" });
-      phpBin = candidate;
-      break;
+      stdout = execSync(`"${candidate}" artisan route:list --json`, {
+        cwd: root, timeout: 15000, encoding: "utf-8", maxBuffer: 5 * 1024 * 1024,
+      });
+      break;  // first success
     } catch { /* try next */ }
   }
-  if (!phpBin) return { nodes, edges };
 
-  let stdout: string;
-  try {
-    stdout = execSync(`"${phpBin}" artisan route:list --json`, {
-      cwd: root,
-      timeout: 15000,
-      encoding: "utf-8",
-      maxBuffer: 5 * 1024 * 1024,
-    });
-  } catch {
-    return { nodes, edges };  // artisan not available, skip
-  }
+  if (!stdout) return { nodes, edges };
 
   let routes: Array<{
     method: string;

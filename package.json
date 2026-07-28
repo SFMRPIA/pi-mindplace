@@ -50,7 +50,8 @@
     "tree-sitter-ruby": "^0.23.1",
     "tree-sitter-rust": "^0.21.0",
     "tree-sitter-scala": "^0.24.0",
-    "tree-sitter-typescript": "^0.23.2"
+    "tree-sitter-typescript": "^0.23.2",
+    "tree-sitter-vue": "^0.2.1"
   },
   "peerDependencies": {
     "typebox": "*"

@@ -51,7 +51,10 @@ export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
     // Get call method name from the target node label
     const tgtNode = kg.nodes.get(edge.target);
     if (!tgtNode) continue;
-    const methodName = tgtNode.label;
+    // Target label could be "pauseStore" (stub) or "GrabMartStoreService.pauseStore" (already resolved)
+    // Extract just the method name portion
+    const tgtLabel = tgtNode.label;
+    const methodName = tgtLabel.includes(".") ? tgtLabel.split(".").pop()! : tgtLabel;
 
     // Resolve based on callContext
     const ctx = edge.callContext;

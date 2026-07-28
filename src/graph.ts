@@ -144,14 +144,9 @@ export class KnowledgeGraph {
         let bestGain = 0;
 
         for (const [comm, weight] of commWeights) {
-          // Simple modularity gain: more neighbors in same community = better
           if (weight > bestGain && comm !== currentComm) {
-            // Additional check: don't move to empty communities
-            const currentSize = [...communities.values()].filter(c => c === currentComm).length;
-            if (currentSize > 1 || weight > 0) {
-              bestGain = weight;
-              bestComm = comm;
-            }
+            bestGain = weight;
+            bestComm = comm;
           }
         }
 

@@ -10,6 +10,7 @@ import { buildSearchIndex } from "./search.ts";
 import { buildClassIndex, saveClassIndex } from "./class-index.ts";
 import { resolveCalls } from "./resolve.ts";
 import { findGraphRoot, graphPath } from "./paths.ts";
+import { ensureWatcher } from "./watcher.ts";
 
 const OUT_DIR = "graph-out";
 
@@ -56,6 +57,7 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
   // parent) so sessions inside sub-folders refresh/rebuild the root graph
   // instead of creating a per-folder one.
   const root = findGraphRoot(cwd) ?? cwd;
+  ensureWatcher(root); // lazy start — one watcher per graph root
   const gp = graphPath(root);
   const exists = existsSync(gp);
 

@@ -7,6 +7,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { searchIndex, searchDbPath } from "../search.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
 import { findGraphRoot } from "../paths.ts";
+import { stalenessBanner } from "../watcher.ts";
 import { existsSync } from "node:fs";
 
 export const MindplaceSearchTool = {
@@ -81,7 +82,7 @@ export const MindplaceSearchTool = {
     lines.push(`_${results.length} results_`);
 
     return {
-      content: [{ type: "text" as const, text: lines.join("\n") }],
+      content: [{ type: "text" as const, text: stalenessBanner(root) + lines.join("\n") }],
       details: { resultCount: results.length },
     };
   },

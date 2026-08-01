@@ -22,6 +22,8 @@ const DEFAULT_IGNORE = new Set([
   ".nyc_output",
   "graph-out",
   ".graphify",
+  "storage",
+  "test-results",
 ]);
 
 const MAX_FILES = 10_000;

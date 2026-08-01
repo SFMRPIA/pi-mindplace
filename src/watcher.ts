@@ -92,6 +92,15 @@ export function ensureWatcher(root: string): void {
 }
 
 /**
+ * True when a watcher is currently running for this root — lets the refresh
+ * path skip route re-extraction on fresh graphs (the watcher already covers
+ * routes/*.php edits).
+ */
+export function isWatching(root: string): boolean {
+  return watchers.has(root);
+}
+
+/**
  * Root-relative files changed within the debounce window — used for the
  * staleness banner so the agent knows the graph may lag an edit by ~2s.
  */
@@ -99,4 +108,12 @@ export function pendingChanges(root: string): string[] {
   const st = watchers.get(root);
   if (!st || st.pending.size === 0) return [];
   return [...st.pending].map(p => p.slice(root.length + 1));
+}
+
+/** Banner text for files changed within the debounce window; "" when none. */
+export function stalenessBanner(root: string): string {
+  const pending = pendingChanges(root);
+  if (pending.length === 0) return "";
+  const shown = pending.slice(0, 5).map(f => `\`${f}\``).join(", ");
+  return `⚠️ ${pending.length} file(s) changed in the last ~2s — the graph may not include them yet: ${shown}\n\n`;
 }

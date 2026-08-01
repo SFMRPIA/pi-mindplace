@@ -10,7 +10,7 @@ import { buildSearchIndex } from "./search.ts";
 import { buildClassIndex, saveClassIndex } from "./class-index.ts";
 import { resolveCalls } from "./resolve.ts";
 import { findGraphRoot, graphPath } from "./paths.ts";
-import { ensureWatcher } from "./watcher.ts";
+import { ensureWatcher, isWatching } from "./watcher.ts";
 
 const OUT_DIR = "graph-out";
 
@@ -70,6 +70,11 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     let reason: string;
 
     if (exists && !isStale(root, detected)) {
+      if (isWatching(root)) {
+        // Watcher keeps the graph in sync (routes/*.php edits included) —
+        // skip the ~3s route re-extraction and index rebuild entirely.
+        return { refreshed: false, reason: "fresh (watcher active)" };
+      }
       // Graph is fresh — load it and only update routes
       const existing = JSON.parse(readFileSync(gp, "utf-8"));
       kg = KnowledgeGraph.fromJSON(existing);

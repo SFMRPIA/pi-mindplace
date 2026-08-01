@@ -14,9 +14,99 @@
 
 import type { GraphNode, GraphEdge, QueryResult } from "./types.ts";
 import { KnowledgeGraph } from "./graph.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** Approximate tokens per character — conservative estimate */
 const CHARS_PER_TOKEN = 4;
+
+// ── Source snippets ──────────────────────────────────────────────────────────
+// (ponytail: line-window heuristics — next-symbol end or +30 lines; enough to
+//  show real context, not AST-accurate bodies)
+
+const SNIPPET_BUDGET = 1200; // tokens
+const MAX_SNIPPET_LINES = 40;
+
+/**
+ * Verbatim source for the top concrete symbols in a result set.
+ * Reads each file once; bounded by a token budget; never throws.
+ */
+export function buildSourceSnippets(root: string, nodes: GraphNode[], queryBudget: number): string {
+  const budget = Math.min(SNIPPET_BUDGET, Math.floor(queryBudget * 0.25));
+  if (budget < 100) return "";
+
+  // Candidates: concrete code symbols with a numeric source location
+  const candidates = nodes.filter(
+    n => (n.type === "method" || n.type === "function" || n.type === "class") &&
+         n.sourceFile && n.sourceLocation && /L\d+/.test(n.sourceLocation),
+  );
+
+  // Keep up to 3 symbols per file, 3 files total — read each file once
+  const perFile = new Map<string, GraphNode[]>();
+  for (const n of candidates) {
+    const arr = perFile.get(n.sourceFile) ?? [];
+    if (arr.length < 3) arr.push(n);
+    perFile.set(n.sourceFile, arr);
+  }
+
+  const lines: string[] = [];
+  let tokens = 0;
+
+  for (const [file, syms] of [...perFile.entries()].slice(0, 3)) {
+    const abs = join(root, file);
+    let source: string;
+    try {
+      source = readFileSync(abs, "utf-8");
+    } catch {
+      continue;
+    }
+    const srcLines = source.split(/\r?\n/);
+
+    for (const sym of syms) {
+      const m = sym.sourceLocation!.match(/L(\d+)(?:\s*-\s*L?(\d+))?/);
+      if (!m) continue;
+      const start = parseInt(m[1], 10);
+      if (start < 1 || start > srcLines.length) continue;
+
+      let end: number;
+      if (m[2]) {
+        end = parseInt(m[2], 10);
+      } else {
+        // End at the next symbol's start line in this file, else +30
+        const nextLine = syms
+          .map(o => o.sourceLocation?.match(/L(\d+)/)?.[1])
+          .filter(Boolean)
+          .map(Number)
+          .filter(l => l > start)
+          .sort((a, b) => a - b)[0];
+        end = (nextLine ?? start + 31) - 1;
+      }
+      end = Math.min(end, start + MAX_SNIPPET_LINES - 1, srcLines.length);
+      if (end < start) continue;
+
+      const body = srcLines.slice(start - 1, end).join("\n");
+      const cost = Math.ceil(body.length / CHARS_PER_TOKEN);
+      if (tokens + cost > budget) {
+        return lines.length ? "\n" + lines.join("\n") : "";
+      }
+      tokens += cost;
+
+      const lang = file.endsWith(".php") ? "php"
+        : file.endsWith(".vue") ? "vue"
+        : file.endsWith(".py") ? "python"
+        : file.endsWith(".go") ? "go"
+        : file.endsWith(".sh") ? "bash"
+        : "ts";
+      lines.push(`### Source: ${sym.label} (\`${file}:${start}\`)`);
+      lines.push("```" + lang);
+      lines.push(body);
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  return lines.length ? "\n" + lines.join("\n") : "";
+}
 
 /** Tokenize text: split camelCase and snake_case */
 function tokenize(text: string): string[] {
@@ -159,7 +249,7 @@ class TfIdfScorer {
 /** Format a single node as markdown */
 function formatNode(node: GraphNode, includeDescription: boolean = true): string {
   let text = `### ${node.label} (${node.type})`;
-  if (node.sourceLocation) text += ` · score: ${(node.centrality ?? 0).toFixed(2)}`;
+  if (node.sourceLocation) text += ` · centrality: ${(node.centrality ?? 0).toFixed(2)}`;
   if (includeDescription && node.description) {
     text += `\n${node.description}`;
   }

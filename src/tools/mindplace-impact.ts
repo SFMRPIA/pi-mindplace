@@ -12,6 +12,8 @@ import { KnowledgeGraph } from "../graph.ts";
 import type { GraphNode } from "../types.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
 import { findGraphRoot, graphPath } from "../paths.ts";
+import { stalenessBanner } from "../watcher.ts";
+import { buildSourceSnippets } from "../query.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -246,6 +248,11 @@ export const MindplaceImpactTool = {
       }
     }
 
-    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    return {
+      content: [{
+        type: "text" as const,
+        text: stalenessBanner(root) + lines.join("\n") + buildSourceSnippets(root, [targetNode], 1200),
+      }],
+    };
   },
 };

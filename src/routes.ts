@@ -1,6 +1,8 @@
 /**
- * Laravel route extraction — runs `php artisan route:list --json` and creates
- * route nodes linked to existing controller method nodes.
+ * Laravel route extraction — runs `php artisan route:list --json` in every
+ * Laravel project under the scan root (the root itself plus immediate
+ * Laravel sub-projects) and creates route nodes linked to existing
+ * controller method nodes.
  */
 
 import { execSync } from "node:child_process";
@@ -13,18 +15,41 @@ export interface RouteExtractionResult {
   edges: GraphEdge[];
 }
 
+/** A directory that looks like a real Laravel app (composer.json + artisan). */
+function isLaravelProject(dir: string): boolean {
+  return existsSync(join(dir, "composer.json")) && existsSync(join(dir, "artisan"));
+}
+
 /**
- * Extract Laravel routes by running `php artisan route:list --json`.
- * Returns route nodes linked to existing controller method nodes.
+ * Find Laravel route-extraction candidates: the root itself (only if it is a
+ * real Laravel app) plus immediate subdirectories that look like Laravel
+ * projects (monorepo sub-projects). A stray `artisan` wrapper without a
+ * composer.json next to it is skipped automatically.
+ *
+ * `prefix` disambiguates node IDs per project (e.g. "backend:route_1_...").
  */
-export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteExtractionResult {
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
+function laravelCandidates(root: string): { dir: string; prefix: string }[] {
+  const candidates: { dir: string; prefix: string }[] = [];
+  if (isLaravelProject(root)) {
+    candidates.push({ dir: root, prefix: "" });
+  }
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      if (entry.name === "node_modules" || entry.name === "vendor") continue;
+      const full = join(root, entry.name);
+      if (isLaravelProject(full)) {
+        candidates.push({ dir: full, prefix: `${entry.name}:` });
+      }
+    }
+  } catch {
+    // Root unreadable — nothing to scan
+  }
+  return candidates;
+}
 
-  // Only run if this looks like a Laravel project
-  if (!existsSync(join(root, "artisan"))) return { nodes, edges };
-
-  // Try "php" from PATH first. If artisan fails, scan common Laragon installs.
+/** PHP binaries to try, in order: PATH first, then common Laragon installs. */
+function phpBinaries(): string[] {
   const LARAGON_ROOTS = [
     process.env.LARAGON_DIR,
     "D:/laragon",
@@ -32,7 +57,7 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
     "E:/laragon",
   ].filter(Boolean) as string[];
 
-  const phpCandidates = [
+  return [
     "php",
     ...LARAGON_ROOTS.flatMap(root => {
       try {
@@ -43,9 +68,44 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
       } catch { return []; }
     }),
   ];
+}
 
+/**
+ * Extract Laravel routes by running `php artisan route:list --json` in every
+ * Laravel project under `root` (the root itself plus immediate sub-projects).
+ * Returns route nodes linked to existing controller method nodes.
+ */
+export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteExtractionResult {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  // Build an index of existing method nodes for quick lookup
+  const methodIndex = new Map<string, GraphNode>();
+  for (const n of existingNodes) {
+    if (n.type === "method" && n.label.includes(".")) {
+      methodIndex.set(n.label, n);
+    }
+  }
+
+  const phpBin = phpBinaries();
+  for (const { dir, prefix } of laravelCandidates(root)) {
+    extractRoutesForProject(dir, prefix, methodIndex, phpBin, nodes, edges);
+  }
+
+  return { nodes, edges };
+}
+
+/** Run `php artisan route:list --json` in one Laravel dir; append nodes/edges. */
+function extractRoutesForProject(
+  root: string,
+  prefix: string,
+  methodIndex: Map<string, GraphNode>,
+  phpBin: string[],
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+): void {
   let stdout: string | null = null;
-  for (const candidate of phpCandidates) {
+  for (const candidate of phpBin) {
     try {
       stdout = execSync(`"${candidate}" -d error_reporting=0 artisan route:list --json`, {
         cwd: root, timeout: 15000, encoding: "utf-8", maxBuffer: 5 * 1024 * 1024,
@@ -54,7 +114,7 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
     } catch { /* try next */ }
   }
 
-  if (!stdout) return { nodes, edges };
+  if (!stdout) return;
 
   let routes: Array<{
     method: string;
@@ -63,19 +123,10 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
     action: string;
     middleware: string[];
   }>;
-
   try {
     routes = JSON.parse(stdout);
   } catch {
-    return { nodes, edges };
-  }
-
-  // Build an index of existing method nodes for quick lookup
-  const methodIndex = new Map<string, GraphNode>();
-  for (const n of existingNodes) {
-    if (n.type === "method" && n.label.includes(".")) {
-      methodIndex.set(n.label, n);
-    }
+    return;
   }
 
   let routeCounter = 0;
@@ -88,13 +139,13 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
 
     routeCounter++;
     const routeLabel = `${route.method} /${route.uri}`;
-    const routeId = `route_${routeCounter}_${routeLabel.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+    const routeId = `${prefix}route_${routeCounter}_${routeLabel.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
     nodes.push({
       id: routeId,
       label: routeLabel,
       type: "route",
-      sourceFile: "routes",
+      sourceFile: prefix ? `${prefix}routes` : "routes",
       sourceLocation: route.name ? `name: ${route.name}` : undefined,
       description: route.middleware.length > 0
         ? `middleware: ${route.middleware.join(", ")}`
@@ -123,13 +174,13 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
         }
 
         // Also create a controller-level reference
-        const controllerNodeId = `route_controller_${shortClass}`;
+        const controllerNodeId = `${prefix}route_controller_${shortClass}`;
         if (!nodes.find(n => n.id === controllerNodeId)) {
           nodes.push({
             id: controllerNodeId,
             label: shortClass,
             type: "controller",
-            sourceFile: "routes",
+            sourceFile: prefix ? `${prefix}routes` : "routes",
           });
         }
         edges.push({
@@ -141,6 +192,4 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
       }
     }
   }
-
-  return { nodes, edges };
 }

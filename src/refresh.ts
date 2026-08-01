@@ -9,13 +9,10 @@ import { extractRoutes } from "./routes.ts";
 import { buildSearchIndex } from "./search.ts";
 import { buildClassIndex, saveClassIndex } from "./class-index.ts";
 import { resolveCalls } from "./resolve.ts";
+import { findGraphRoot, graphPath } from "./paths.ts";
 
 const OUT_DIR = "graph-out";
 const MAX_STALE_CHECK_FILES = 100;
-
-function graphPath(cwd: string): string {
-  return join(cwd, OUT_DIR, "graph.json");
-}
 
 /**
  * Check staleness by comparing source file mtimes against graph mtime.
@@ -59,26 +56,30 @@ function fsStatMtime(absPath: string): number {
  * Uses a single detect() call shared between staleness check and extraction.
  */
 export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boolean; reason?: string }> {
-  const gp = graphPath(cwd);
+  // Resolve to the nearest project root that has a graph (e.g. the monorepo
+  // parent) so sessions inside sub-folders refresh/rebuild the root graph
+  // instead of creating a per-folder one.
+  const root = findGraphRoot(cwd) ?? cwd;
+  const gp = graphPath(root);
   const exists = existsSync(gp);
 
   // Single detect call — reused for staleness check AND extraction
-  const detected = detect(cwd);
+  const detected = detect(root);
   if (detected.files.length === 0) return { refreshed: false, reason: "no supported files" };
 
   try {
     let kg: KnowledgeGraph;
     let reason: string;
 
-    if (exists && !isStale(cwd, detected)) {
+    if (exists && !isStale(root, detected)) {
       // Graph is fresh — load it and only update routes
       const existing = JSON.parse(readFileSync(gp, "utf-8"));
       kg = KnowledgeGraph.fromJSON(existing);
       reason = "routes only";
     } else {
       // No graph or stale — rebuild from files
-      const cacheDir = join(cwd, OUT_DIR, "cache");
-      const extResult = extract(cwd, detected.files, cacheDir, false);
+      const cacheDir = join(root, OUT_DIR, "cache");
+      const extResult = extract(root, detected.files, cacheDir, false);
 
       if (exists) {
         const existing = JSON.parse(readFileSync(gp, "utf-8"));
@@ -94,15 +95,15 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     }
 
     // Always refresh routes — they can change without source file changes
-    const routeResult = extractRoutes(cwd, [...kg.nodes.values()]);
+    const routeResult = extractRoutes(root, [...kg.nodes.values()]);
 
     // Build class index and resolve cross-file calls
-    const classIndex = buildClassIndex(cwd, kg);
+    const classIndex = buildClassIndex(root, kg);
     const resolvedCount = resolveCalls(kg, classIndex);
-    saveClassIndex(cwd, classIndex);
+    saveClassIndex(root, classIndex);
 
     // Build FTS5 search index (after routes + resolved calls)
-    buildSearchIndex(cwd, kg);
+    buildSearchIndex(root, kg);
     for (const n of routeResult.nodes) {
       if (!kg.nodes.has(n.id)) {
         kg.nodes.set(n.id, { ...n, centrality: 0 });
@@ -123,7 +124,7 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
     kg.computeCentrality();
     kg.detectCommunities();
 
-    mkdirSync(join(cwd, OUT_DIR), { recursive: true });
+    mkdirSync(join(root, OUT_DIR), { recursive: true });
     writeFileSync(gp, JSON.stringify(kg.toJSON(), null, 2), "utf-8");
 
     return { refreshed: true, reason };

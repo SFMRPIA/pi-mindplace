@@ -8,10 +8,10 @@
 import { Type } from "typebox";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { KnowledgeGraph } from "../graph.ts";
 import type { GraphNode } from "../types.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
+import { findGraphRoot, graphPath } from "../paths.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -174,14 +174,14 @@ export const MindplaceImpactTool = {
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
-    const root = params.path ?? ctx.cwd;
+    const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
     const maxDepth = Math.min(params.depth ?? 2, 5);
     const maxResults = 50;
 
     // Auto-refresh graph
     await refreshGraphIfStale(root);
 
-    const gp = join(root, "graph-out", "graph.json");
+    const gp = graphPath(root);
     if (!existsSync(gp)) {
       return {
         content: [{ type: "text" as const, text: "No graph found. Run mindplace_build first." }],

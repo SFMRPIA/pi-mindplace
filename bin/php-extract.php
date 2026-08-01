@@ -3,8 +3,7 @@
  * PHP-Parser based extraction for pi-mindplace.
  * Used as a fallback for files too large for tree-sitter.
  *
- * Usage: php php-extract.php <file-path> <autoload-path>
- * Output: JSON with nodes and edges
+ * Usage: php php-extract.php <file-path> [rel-path] [autoload-path]
  */
 
 error_reporting(0);
@@ -78,18 +77,25 @@ try {
 
 // Process the file path for consistent node IDs (same format as tree-sitter extractor)
 $relPath = $filePath;
-// Try to make the path relative — check multiple common project roots
-$candidates = [
-    dirname($autoload, 2),  // parent of vendor/
-    dirname($autoload, 3),
-    dirname($autoload, 4),
-];
-foreach ($candidates as $root) {
-    $root = str_replace('\\', '/', $root);
-    $searchPath = str_replace('\\', '/', $filePath);
-    if (str_starts_with($searchPath, $root . '/')) {
-        $relPath = substr($searchPath, strlen($root) + 1);
-        break;
+// When the caller passes an explicit root-relative path (arg 2), use it
+// verbatim — node IDs then match tree-sitter's, so the dual-pass merge in
+// extract.ts deduplicates correctly (monorepo-safe).
+if (isset($argv[2]) && $argv[2] !== '') {
+    $relPath = $argv[2];
+} else {
+    // Try to make the path relative — check multiple common project roots
+    $candidates = [
+        dirname($autoload, 2),  // parent of vendor/
+        dirname($autoload, 3),
+        dirname($autoload, 4),
+    ];
+    foreach ($candidates as $root) {
+        $root = str_replace('\\', '/', $root);
+        $searchPath = str_replace('\\', '/', $filePath);
+        if (str_starts_with($searchPath, $root . '/')) {
+            $relPath = substr($searchPath, strlen($root) + 1);
+            break;
+        }
     }
 }
 

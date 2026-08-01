@@ -27,13 +27,10 @@ import { MindplaceExplainTool } from "./src/tools/mindplace-explain.ts";
 import { MindplaceSearchTool } from "./src/tools/mindplace-search.ts";
 import { MindplaceImpactTool } from "./src/tools/mindplace-impact.ts";
 import { KnowledgeGraph } from "./src/graph.ts";
+import { findGraphRoot, graphPath } from "./src/paths.ts";
 
 const OUT_DIR = "graph-out";
 const GRAPH_FILE = "graph.json";
-
-function graphPath(cwd: string): string {
-  return join(cwd, OUT_DIR, GRAPH_FILE);
-}
 
 /**
  * Build a compact file-level context string from the knowledge graph.
@@ -41,7 +38,9 @@ function graphPath(cwd: string): string {
  * each file with its top symbols. Fits within a token budget (~1500 tokens).
  */
 function buildFileContext(cwd: string): string {
-  const gp = graphPath(cwd);
+  // Resolve to the nearest graph root (monorepo parent) so the file map
+  // covers the whole repo even when the session starts in a sub-folder.
+  const gp = graphPath(findGraphRoot(cwd) ?? cwd);
   if (!existsSync(gp)) return "";
 
   try {
@@ -180,10 +179,11 @@ export default function (pi: ExtensionAPI) {
   // plus the always-on file map. Otherwise, detect monorepo sub-projects
   // and provide targeted instructions.
   pi.on("before_agent_start", (event, ctx) => {
-    const gp = graphPath(ctx.cwd);
+    const root = findGraphRoot(ctx.cwd) ?? ctx.cwd;
+    const gp = graphPath(root);
 
     if (existsSync(gp)) {
-      const fileMap = buildFileContext(ctx.cwd);
+      const fileMap = buildFileContext(root);
       let prompt = GRAPH_FIRST_INSTRUCTIONS;
       if (fileMap) {
         prompt += "\n" + fileMap;
@@ -241,7 +241,7 @@ Build a per-project graph before answering codebase questions:
   pi.registerCommand("mindplace", {
     description: "Build or query the mind place knowledge graph",
     handler: async (args, ctx) => {
-      const gp = graphPath(ctx.cwd);
+      const gp = graphPath(findGraphRoot(ctx.cwd) ?? ctx.cwd);
       const graphExists = existsSync(gp);
 
       if (!args) {

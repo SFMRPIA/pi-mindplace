@@ -547,11 +547,14 @@ function extractPhpViaSubprocess(filePath: string, absPath: string): ExtractionR
   const _filename = fileURLToPath(import.meta.url);
   const _dirname = dirname(_filename);
   const scriptPath = join(_dirname, "..", "bin", "php-extract.php");
-  const phpBinary = "D:/laragon/bin/php/php-8.4.19-Win32-vs17-x64/php.exe";
 
   try {
+    // Use the global php from PATH. Pass the root-relative path (arg 3) so
+    // php-extract.php emits the same node IDs as tree-sitter — the dual-pass
+    // merge in extract() then deduplicates instead of keeping two copies.
+    const relPath = filePath.replace(/\\/g, "/");
     const stdout = execSync(
-      `"${phpBinary}" "${scriptPath}" "${absPath}"`,
+      `php "${scriptPath}" "${absPath}" "${relPath}"`,
       { timeout: 10000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
     );
 

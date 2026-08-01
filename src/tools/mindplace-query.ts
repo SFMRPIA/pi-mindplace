@@ -5,13 +5,11 @@
 import { Type } from "typebox";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 import { KnowledgeGraph } from "../graph.ts";
 import { query, formatQueryResult } from "../query.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
-
-const OUT_DIR = "graph-out";
+import { findGraphRoot, graphPath } from "../paths.ts";
 
 export const MindplaceQueryTool = {
   name: "mindplace_query",
@@ -51,14 +49,14 @@ export const MindplaceQueryTool = {
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
   ) {
-    const root = params.path ?? ctx.cwd;
+    const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
 
     // Auto-refresh graph if stale before querying
     await refreshGraphIfStale(root);
 
-    const graphPath = join(root, OUT_DIR, "graph.json");
+    const gp = graphPath(root);
 
-    if (!existsSync(graphPath)) {
+    if (!existsSync(gp)) {
       return {
         content: [
           {
@@ -72,7 +70,7 @@ export const MindplaceQueryTool = {
     }
 
     try {
-      const raw = JSON.parse(readFileSync(graphPath, "utf-8"));
+      const raw = JSON.parse(readFileSync(gp, "utf-8"));
       const kg = KnowledgeGraph.fromJSON(raw);
 
       const budget = params.budget ?? 4000;

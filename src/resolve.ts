@@ -76,7 +76,7 @@ export function resolveCalls(kg: KnowledgeGraph, index: ClassIndex): number {
       if (propInfo && propInfo.type) {
         resolvedClass = resolveToClass(propInfo.type, ci, index);
       }
-    } else if (!ctx.startsWith("$") && !ctx.startsWith("$")) {
+    } else if (!ctx.startsWith("$")) {
       // Static call: ClassName::method() — ctx is the class name
       resolvedClass = resolveToClass(ctx, ci, index);
     }

@@ -54,6 +54,12 @@ const CTOR_PARAM_RE = /([\w\\]+)\s+\$(\w+)/g;
 /** Extracts the constructor signature */
 const CTOR_SIG_RE = /function\s+__construct\s*\(([^)]*)\)/s;
 
+/** Matches in-class assignment: $this->foo = new Foo(...) */
+const ASSIGN_NEW_RE = /\$this->(\w+)\s*=\s*new\s+([\w\\]+)\s*\(/g;
+
+/** Matches Laravel container resolution: $this->foo = resolve(Foo::class) / app(Foo::class) */
+const ASSIGN_RESOLVE_RE = /\$this->(\w+)\s*=\s*(?:resolve|app)\s*\(\s*([\w\\]+)::class\s*\)/g;
+
 // ── Build index ───────────────────────────────────────────────────────────────
 
 export function buildClassIndex(cwd: string, kg: KnowledgeGraph): ClassIndex {
@@ -172,6 +178,28 @@ export function buildClassIndex(cwd: string, kg: KnowledgeGraph): ClassIndex {
         if (!ci.properties.has(name)) {
           ci.properties.set(name, { name, type: m[1] });
         }
+      }
+    }
+
+    // 5d: Assignment inference (last fallback for untyped props)
+    //     $this->foo = new Foo(...)  /  $this->foo = resolve(Foo::class)
+    // (ponytail: file-global regex — an assignment in any method is accepted;
+    //  constructor-scope it if a mis-inference ever shows up)
+    const inferType = (raw: string): string => {
+      let type = raw.replace(/^\\/, "");
+      if (type.includes("\\")) type = type.split("\\").pop()!;
+      return type;
+    };
+    while ((m = ASSIGN_NEW_RE.exec(source)) !== null) {
+      const name = "$" + m[1];
+      if (!ci.properties.has(name)) {
+        ci.properties.set(name, { name, type: inferType(m[2]) });
+      }
+    }
+    while ((m = ASSIGN_RESOLVE_RE.exec(source)) !== null) {
+      const name = "$" + m[1];
+      if (!ci.properties.has(name)) {
+        ci.properties.set(name, { name, type: inferType(m[2]) });
       }
     }
   }

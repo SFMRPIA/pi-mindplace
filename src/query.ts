@@ -45,6 +45,7 @@ function estimateTokens(text: string): number {
 class TfIdfScorer {
   private idf = new Map<string, number>();
   private docs: Map<string, string[]> = new Map();
+  private labels = new Map<string, string>();
 
   constructor(nodes: Map<string, GraphNode>) {
     // Build document corpus: one doc per node (label + description)
@@ -54,6 +55,7 @@ class TfIdfScorer {
       const tokens = tokenize(text);
       if (tokens.length > 0) {
         this.docs.set(id, tokens);
+        this.labels.set(id, node.label);
         docCount++;
       }
     }
@@ -125,7 +127,32 @@ class TfIdfScorer {
     if (docNorm === 0) return 0;
 
     const cosine = dotProduct / (queryNorm * docNorm);
-    return Math.min(1, cosine + substringBonus);
+    let score = Math.min(1, cosine + substringBonus);
+
+    // Exact-label boost: naming a symbol verbatim must outrank lexical
+    // partials. Rules:
+    //   1. query contains the FULL label (>=8 chars) → 0.95
+    //      (long labels are specific; short generic words stay lexical)
+    //   2. label contains the WHOLE query (>=4 chars, not a stopword)
+    //      and isn't much longer → 0.9  (query "login" → "AuthController.login")
+    const EXACT_STOP = new Set([
+      "get", "set", "put", "add", "new", "list", "show", "find", "use",
+      "with", "from", "into", "what", "how", "the", "for", "and", "are",
+      "all", "any", "this", "that", "route", "routes", "file", "files",
+    ]);
+    const normLabel = (this.labels.get(nodeId) ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normQuery = queryTokens.join("");
+    if (normLabel.length >= 8 && normQuery.includes(normLabel)) {
+      score = Math.max(score, 0.95);
+    } else if (
+      normQuery.length >= 4 &&
+      !EXACT_STOP.has(normQuery) &&
+      normLabel.includes(normQuery) &&
+      normLabel.length <= normQuery.length + 12
+    ) {
+      score = Math.max(score, 0.9);
+    }
+    return score;
   }
 }
 

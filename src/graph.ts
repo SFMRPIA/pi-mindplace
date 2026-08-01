@@ -12,6 +12,9 @@
 
 import type { GraphNode, GraphEdge, ExtractionResult, GraphStats } from "./types.ts";
 
+/** Test/spec path pattern — de-weighted in ranking so tests don't dominate */
+const TEST_RE = /(^|[\\/])tests?[\\/]|\.test\.|\.spec\./i;
+
 export class KnowledgeGraph {
   nodes: Map<string, GraphNode> = new Map();
   edges: GraphEdge[] = [];
@@ -107,6 +110,15 @@ export class KnowledgeGraph {
       const node = this.nodes.get(id);
       if (node) node.centrality = Math.round(scores[i] * 1000) / 1000;
     }
+
+    // De-weight test/spec nodes so ranking and god nodes reflect
+    // production code. 0.1 keeps a weak signal — tune if tests matter.
+    // (ponytail: pattern is path-based; a test outside tests/ dir isn't caught)
+    for (const [, node] of this.nodes) {
+      if (node.sourceFile && TEST_RE.test(node.sourceFile)) {
+        node.centrality = Math.round(node.centrality * 0.1 * 1000) / 1000;
+      }
+    }
   }
 
   /** Louvain community detection */
@@ -177,6 +189,7 @@ export class KnowledgeGraph {
   /** God nodes — highest degree nodes */
   topNodes(limit: number = 10): Array<{ id: string; label: string; degree: number }> {
     return [...this.nodes.values()]
+      .filter(n => !n.sourceFile || !TEST_RE.test(n.sourceFile))
       .map(n => ({
         id: n.id,
         label: n.label,

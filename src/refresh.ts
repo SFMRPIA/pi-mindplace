@@ -12,7 +12,6 @@ import { resolveCalls } from "./resolve.ts";
 import { findGraphRoot, graphPath } from "./paths.ts";
 
 const OUT_DIR = "graph-out";
-const MAX_STALE_CHECK_FILES = 100;
 
 /**
  * Check staleness by comparing source file mtimes against graph mtime.
@@ -25,18 +24,15 @@ function isStale(cwd: string, detected: DetectResult): boolean {
 
   const graphMtime = statSync(gp).mtimeMs;
 
-  // Sort by newest first — the most likely to have changed
-  // Limit to MAX_STALE_CHECK_FILES to keep it fast
-  let checked = 0;
+  // Check every file's mtime — a burst of edits can leave older files
+  // stale past a top-100 window. ~1,500 stats costs a few tens of ms.
   const files = detected.files
     .map(f => ({ file: f, mtime: fsStatMtime(join(cwd, f)) }))
     .filter((f): f is { file: string; mtime: number } => f.mtime !== -1)
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, MAX_STALE_CHECK_FILES);
+    .sort((a, b) => b.mtime - a.mtime);
 
   for (const { mtime } of files) {
     if (mtime > graphMtime) return true;
-    checked++;
   }
 
   return false;

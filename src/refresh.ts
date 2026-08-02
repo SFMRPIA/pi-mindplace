@@ -107,21 +107,15 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
 
     // Build FTS5 search index (after routes + resolved calls)
     buildSearchIndex(root, kg);
-    for (const n of routeResult.nodes) {
-      if (!kg.nodes.has(n.id)) {
-        kg.nodes.set(n.id, { ...n, centrality: 0 });
-        kg.adjacency.set(n.id, new Set());
-      }
-    }
+    // Route nodes/edges go through the deduped merge — re-running routes on
+    // every refresh must not grow the edges array (it used to add ~910
+    // duplicates per refresh).
+    kg.merge(routeResult);
     for (const e of routeResult.edges) {
-      if (kg.nodes.has(e.source) && kg.nodes.has(e.target)) {
-        kg.edges.push({ ...e });
-        kg.adjacency.get(e.source)?.add(e.target);
-        kg.adjacency.get(e.target)?.add(e.source);
-        const out = kg.outgoing.get(e.source) ?? new Set();
-        out.add(e.target);
-        kg.outgoing.set(e.source, out);
-      }
+      if (!kg.nodes.has(e.source)) continue;
+      const out = kg.outgoing.get(e.source) ?? new Set();
+      out.add(e.target);
+      kg.outgoing.set(e.source, out);
     }
 
     kg.computeCentrality();

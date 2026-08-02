@@ -153,23 +153,14 @@ async function buildSingleProject(
       kg = KnowledgeGraph.fromExtraction(extResult, directed);
     }
 
-    // Step 4: Add Laravel route nodes
+    // Step 4: Add Laravel route nodes (deduped merge — same as refresh)
     const routeResult = extractRoutes(root, [...kg.nodes.values()]);
-    for (const n of routeResult.nodes) {
-      if (!kg.nodes.has(n.id)) {
-        kg.nodes.set(n.id, { ...n, centrality: 0 });
-        kg.adjacency.set(n.id, new Set());
-      }
-    }
+    kg.merge(routeResult);
     for (const e of routeResult.edges) {
-      if (kg.nodes.has(e.source) && kg.nodes.has(e.target)) {
-        kg.edges.push({ ...e });
-        kg.adjacency.get(e.source)?.add(e.target);
-        kg.adjacency.get(e.target)?.add(e.source);
-        const out = kg.outgoing.get(e.source) ?? new Set();
-        out.add(e.target);
-        kg.outgoing.set(e.source, out);
-      }
+      if (!kg.nodes.has(e.source)) continue;
+      const out = kg.outgoing.get(e.source) ?? new Set();
+      out.add(e.target);
+      kg.outgoing.set(e.source, out);
     }
 
     // Step 5: Build class index and resolve cross-file calls

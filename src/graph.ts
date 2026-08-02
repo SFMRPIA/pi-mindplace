@@ -60,8 +60,34 @@ export class KnowledgeGraph {
         this.adjacency.set(node.id, new Set());
       }
     }
+
+    // Deduplicate edges: re-extracting a file whose edges already exist must
+    // not grow the edges array (it used to double graph.json on every watcher
+    // sync — 21k rows for 10.5k pairs). Undirected graphs key on the unordered
+    // pair + relation so A→B and B→A collapse to one row, matching the full
+    // build (fromExtraction). Also cleans up already-doubled graphs.
+    const keyOf = (e: GraphEdge): string => {
+      const [a, b] = e.source < e.target ? [e.source, e.target] : [e.target, e.source];
+      const pair = this.isDirected ? `${e.source}\u0000${e.target}` : `${a}\u0000${b}`;
+      return `${pair}\u0000${e.relation}`;
+    };
+
+    const seen = new Set<string>();
+    const deduped: GraphEdge[] = [];
+    for (const e of this.edges) {
+      const k = keyOf(e);
+      if (!seen.has(k)) {
+        seen.add(k);
+        deduped.push(e);
+      }
+    }
+    this.edges = deduped;
+
     for (const edge of result.edges) {
       if (this.nodes.has(edge.source) && this.nodes.has(edge.target)) {
+        const k = keyOf(edge);
+        if (seen.has(k)) continue;
+        seen.add(k);
         this.edges.push({ ...edge });
         this.adjacency.get(edge.source)?.add(edge.target);
         this.adjacency.get(edge.target)?.add(edge.source);

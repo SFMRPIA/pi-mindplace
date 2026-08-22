@@ -1049,5 +1049,38 @@ export function extract(
 
   if (cacheDir) saveCache(cacheDir, cache);
 
+  // ── Enrich descriptions with callee names ──────────────────────────────
+  // Gives the TF-IDF scorer real semantic signal: a method named
+  // "handleSubmit" that calls "validateForm", "saveToDb" earns a description
+  // of "Calls: validateForm, saveToDb" so searching "save" or "validate"
+  // matches it.
+  const targetLabels = new Map<string, string>();
+  for (const n of allNodes) targetLabels.set(n.id, n.label);
+
+  const calleeMap = new Map<string, Set<string>>();
+  for (const e of allEdges) {
+    if (e.relation !== "calls") continue;
+    const set = calleeMap.get(e.source) ?? new Set();
+    set.add(e.target);
+    calleeMap.set(e.source, set);
+  }
+
+  for (const n of allNodes) {
+    if (n.type === "file") continue;
+    if (n.description && /calls:/i.test(n.description)) continue;
+    const targets = calleeMap.get(n.id);
+    if (!targets || targets.size === 0) continue;
+    const names = [...targets]
+      .map(id => targetLabels.get(id))
+      .filter((l): l is string => !!l && l !== n.label)
+      .slice(0, 8);
+    if (names.length === 0) continue;
+    const suffix = names.join(", ");
+    if (suffix.length > 200) continue;
+    n.description = n.description
+      ? `${n.description} | Calls: ${suffix}`
+      : `Calls: ${suffix}`;
+  }
+
   return { nodes: allNodes, edges: allEdges, cached, extracted };
 }

@@ -11,56 +11,60 @@ import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import Parser from "tree-sitter";
-// @ts-expect-error WASM
-import JavaScript from "tree-sitter-javascript";
-// @ts-expect-error WASM
-import TsLang from "tree-sitter-typescript/bindings/node/typescript.js";
-// @ts-expect-error WASM
-import TsxLang from "tree-sitter-typescript/bindings/node/tsx.js";
-// @ts-expect-error WASM
-import Python from "tree-sitter-python";
-// @ts-expect-error WASM
-import Go from "tree-sitter-go";
-// @ts-expect-error WASM
-import Bash from "tree-sitter-bash";
-// @ts-expect-error WASM
-import Json from "tree-sitter-json";
-// @ts-expect-error WASM
-import Java from "tree-sitter-java";
-// @ts-expect-error WASM
-import Rust from "tree-sitter-rust";
-// @ts-expect-error WASM
-import Cpp from "tree-sitter-cpp";
-// @ts-expect-error WASM
-import Ruby from "tree-sitter-ruby";
-// @ts-expect-error WASM
-import Kotlin from "tree-sitter-kotlin";
-// @ts-expect-error WASM
-import Scala from "tree-sitter-scala";
-// @ts-expect-error WASM
-import Php from "tree-sitter-php";
+import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 
 import type { ExtractionResult, GraphEdge, GraphNode } from "./types.ts";
 import { CODE_EXTENSIONS } from "./types.ts";
 
 const parser = new Parser();
 
-const GRAMMARS: Record<string, { grammar: Parser.Language; exts: Set<string> }> = {
-  javascript: { grammar: JavaScript as unknown as Parser.Language, exts: new Set([".js", ".mjs", ".cjs"]) },
-  typescript: { grammar: TsLang as unknown as Parser.Language, exts: new Set([".ts", ".mts", ".cts"]) },
-  tsx: { grammar: TsxLang as unknown as Parser.Language, exts: new Set([".tsx", ".jsx"]) },
-  python: { grammar: Python as unknown as Parser.Language, exts: new Set([".py", ".pyi"]) },
-  go: { grammar: Go as unknown as Parser.Language, exts: new Set([".go"]) },
-  bash: { grammar: Bash as unknown as Parser.Language, exts: new Set([".sh", ".bash", ".zsh"]) },
-  json: { grammar: Json as unknown as Parser.Language, exts: new Set([".json"]) },
-  java: { grammar: Java as unknown as Parser.Language, exts: new Set([".java"]) },
-  rust: { grammar: Rust as unknown as Parser.Language, exts: new Set([".rs"]) },
-  cpp: { grammar: Cpp as unknown as Parser.Language, exts: new Set([".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"]) },
-  ruby: { grammar: Ruby as unknown as Parser.Language, exts: new Set([".rb"]) },
-  kotlin: { grammar: Kotlin as unknown as Parser.Language, exts: new Set([".kt", ".kts"]) },
-  scala: { grammar: Scala as unknown as Parser.Language, exts: new Set([".scala", ".sc"]) },
-  php: { grammar: Php.php as unknown as Parser.Language, exts: new Set([".php", ".phtml"]) },
-};
+// ── Lazy + self-building grammar loading ────────────────────────────────────
+// Tree-sitter grammar packages ship native `.node` addons. Some have no prebuilt
+// for every platform/Node ABI (e.g. kotlin on Node 26), and npm v12 blocks
+// install scripts. So we load lazily and self-build via node-gyp if needed.
+// PHP kept — our fork's dual-pass needs it, upstream doesn't have it.
+const _require = createRequire(import.meta.url);
+interface GrammarSpec { module: string; exts: string[]; }
+const GRAMMAR_SPECS: GrammarSpec[] = [
+  { module: "tree-sitter-javascript", exts: [".js", ".mjs", ".cjs"] },
+  { module: "tree-sitter-typescript/bindings/node/typescript.js", exts: [".ts", ".mts", ".cts"] },
+  { module: "tree-sitter-typescript/bindings/node/tsx.js", exts: [".tsx", ".jsx"] },
+  { module: "tree-sitter-python", exts: [".py", ".pyi"] },
+  { module: "tree-sitter-go", exts: [".go"] },
+  { module: "tree-sitter-bash", exts: [".sh", ".bash", ".zsh"] },
+  { module: "tree-sitter-json", exts: [".json"] },
+  { module: "tree-sitter-java", exts: [".java"] },
+  { module: "tree-sitter-rust", exts: [".rs"] },
+  { module: "tree-sitter-cpp", exts: [".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"] },
+  { module: "tree-sitter-c-sharp", exts: [".cs"] },
+  { module: "tree-sitter-ruby", exts: [".rb"] },
+  { module: "tree-sitter-kotlin", exts: [".kt", ".kts"] },
+  { module: "tree-sitter-scala", exts: [".scala", ".sc"] },
+  { module: "tree-sitter-php", exts: [".php", ".phtml"] },
+];
+interface LoadedGrammar { grammar: Parser.Language; exts: Set<string>; }
+const grammarCache = new Map<string, LoadedGrammar | null>();
+const grammarWarned = new Set<string>();
+const BUILD_TIMEOUT_MS = 180_000;
+let nodeGypBinCache: string | null | undefined;
+function getNodeGypBin(): string | null {
+  if (nodeGypBinCache !== undefined) return nodeGypBinCache;
+  nodeGypBinCache = null;
+  try { const pkgJson = _require.resolve("node-gyp/package.json"); const pkg = _require(pkgJson) as { bin?: string | Record<string, string> }; const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["node-gyp"]; if (bin) { nodeGypBinCache = join(dirname(pkgJson), bin); return nodeGypBinCache; } } catch {}
+  try { const res = spawnSync("npm", ["root", "-g"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }); if (res.status === 0) { const npmRoot = (res.stdout || "").trim(); for (const cand of [join(npmRoot, "npm", "node_modules", "node-gyp", "bin", "node-gyp.js"), join(npmRoot, "node-gyp", "bin", "node-gyp.js")]) if (existsSync(cand)) { nodeGypBinCache = cand; return cand; } } } catch {}
+  return null;
+}
+function grammarPackageDir(spec: GrammarSpec): string | null { const pkgName = spec.module.split("/")[0]; try { return dirname(_require.resolve(`${pkgName}/package.json`)); } catch { return null; } }
+function buildGrammar(spec: GrammarSpec): boolean { const pkgDir = grammarPackageDir(spec); const nodeGyp = getNodeGypBin(); if (!pkgDir || !nodeGyp) return false; try { const res = spawnSync(process.execPath, [nodeGyp, "rebuild"], { cwd: pkgDir, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8", timeout: BUILD_TIMEOUT_MS, windowsHide: true }); return res.status === 0; } catch { return false; } }
+function loadGrammar(spec: GrammarSpec): LoadedGrammar | null {
+  const key = spec.module; if (grammarCache.has(key)) return grammarCache.get(key) ?? null;
+  const tryLoad = (): LoadedGrammar | null => { try { const grammar = _require(spec.module) as unknown as Parser.Language; return { grammar, exts: new Set(spec.exts) }; } catch { return null; } };
+  let loaded = tryLoad(); if (!loaded && buildGrammar(spec)) loaded = tryLoad();
+  if (loaded) { grammarCache.set(key, loaded); return loaded; }
+  grammarCache.set(key, null); if (!grammarWarned.has(key)) { grammarWarned.add(key); console.warn(`[pi-mindplace] Grammar "${spec.module}" unavailable — files ${spec.exts.join(", ")} will be skipped.`); }
+  return null;
+}
 
 // ── SHA256 Cache ──────────────────────────────────────────────────────────────
 
@@ -104,8 +108,8 @@ export function nodeId(file: string, name: string): string {
 
 function pickGrammar(file: string): Parser.Language | null {
   const ext = file.includes(".") ? file.slice(file.lastIndexOf(".")) : "";
-  for (const lang of Object.values(GRAMMARS)) {
-    if (lang.exts.has(ext)) return lang.grammar;
+  for (const spec of GRAMMAR_SPECS) {
+    if (spec.exts.includes(ext)) return loadGrammar(spec)?.grammar ?? null;
   }
   return null;
 }

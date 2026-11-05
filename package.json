@@ -34,7 +34,8 @@
   },
   "scripts": {
     "test": "node --experimental-test-module-mocks --experimental-test-coverage --test 'tests/**/*.test.ts'",
-    "test:watch": "node --experimental-test-module-mocks --test --watch 'tests/**/*.test.ts'"
+    "test:watch": "node --experimental-test-module-mocks --test --watch 'tests/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "tree-sitter": "^0.21.1",
@@ -60,8 +61,12 @@
     "access": "public"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.0",
     "@semantic-release/git": "^10.0.0",
-    "semantic-release": "^25.0.0"
+    "@types/node": "^24.19.2",
+    "semantic-release": "^25.0.0",
+    "typebox": "^1.4.4",
+    "typescript": "^5.9.3"
   },
   "pi": {
     "extensions": [

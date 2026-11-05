@@ -78,7 +78,7 @@ describe("KnowledgeGraph", () => {
 
     const top = kg.topNodes(3);
     assert.ok(top.length > 0, "should find god nodes");
-    assert.ok(top[0].degree >= top[1]?.degree ?? 0, "should be sorted by degree");
+    assert.ok(top[0].degree >= (top[1]?.degree ?? 0), "should be sorted by degree");
   });
 
   it("serializes to and from JSON", () => {

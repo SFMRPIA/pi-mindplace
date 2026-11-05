@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { detect } from "../src/detect.ts";
-import { resolve, join, isAbsolute } from "node:path";
+import { resolve, isAbsolute } from "node:path";
 
 const FIXTURES = resolve(import.meta.dirname ?? ".", "fixtures", "sample-project");
 

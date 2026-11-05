@@ -164,6 +164,9 @@ async function buildSingleProject(
     // Step 5: Build class index and resolve cross-file calls
     const classIndex = buildClassIndex(root, kg);
     resolveCalls(kg, classIndex);
+    // Retargeting happens after merge()'s dedup, so a raw call row and its
+    // already-resolved twin can land on the same key and double the edge.
+    kg.dedupeEdges();
     saveClassIndex(root, classIndex);
 
     // Step 6: Build FTS5 search index

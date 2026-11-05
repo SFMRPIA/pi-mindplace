@@ -63,19 +63,11 @@ export class KnowledgeGraph {
 
     // Deduplicate edges: re-extracting a file whose edges already exist must
     // not grow the edges array (it used to double graph.json on every watcher
-    // sync — 21k rows for 10.5k pairs). Undirected graphs key on the unordered
-    // pair + relation so A→B and B→A collapse to one row, matching the full
-    // build (fromExtraction). Also cleans up already-doubled graphs.
-    const keyOf = (e: GraphEdge): string => {
-      const [a, b] = e.source < e.target ? [e.source, e.target] : [e.target, e.source];
-      const pair = this.isDirected ? `${e.source}\u0000${e.target}` : `${a}\u0000${b}`;
-      return `${pair}\u0000${e.relation}`;
-    };
-
+    // sync — 21k rows for 10.5k pairs). Also cleans up already-doubled graphs.
     const seen = new Set<string>();
     const deduped: GraphEdge[] = [];
     for (const e of this.edges) {
-      const k = keyOf(e);
+      const k = this.edgeKey(e);
       if (!seen.has(k)) {
         seen.add(k);
         deduped.push(e);
@@ -85,7 +77,7 @@ export class KnowledgeGraph {
 
     for (const edge of result.edges) {
       if (this.nodes.has(edge.source) && this.nodes.has(edge.target)) {
-        const k = keyOf(edge);
+        const k = this.edgeKey(edge);
         if (seen.has(k)) continue;
         seen.add(k);
         this.edges.push({ ...edge });
@@ -93,6 +85,40 @@ export class KnowledgeGraph {
         this.adjacency.get(edge.target)?.add(edge.source);
       }
     }
+  }
+
+  /**
+   * Edge identity for dedup. Undirected graphs key on the unordered pair +
+   * relation so A→B and B→A collapse to one row, matching fromExtraction();
+   * directed graphs keep the direction (merge() derives its key from isDirected).
+   */
+  private edgeKey(e: GraphEdge): string {
+    const [a, b] = e.source < e.target ? [e.source, e.target] : [e.target, e.source];
+    const pair = this.isDirected ? `${e.source}\u0000${e.target}` : `${a}\u0000${b}`;
+    return `${pair}\u0000${e.relation}`;
+  }
+
+  /**
+   * Collapse duplicate edges to a single row each, returning how many rows were
+   * dropped. merge() dedups everything it sees, but resolveCalls() then
+   * retargets call edges in place: a raw row (`whereIn`) and an already-resolved
+   * row (`User.whereIn`) survive merge as distinct keys, and retargeting folds
+   * them onto one key *after* the dedup pass — which doubled 1447 call edges on
+   * an update build of a 47k-edge graph. Adjacency needs no repair: it is a Set
+   * and every dropped row's twin already contributed its entry.
+   */
+  dedupeEdges(): number {
+    const seen = new Set<string>();
+    const deduped: GraphEdge[] = [];
+    for (const edge of this.edges) {
+      const k = this.edgeKey(edge);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      deduped.push(edge);
+    }
+    const dropped = this.edges.length - deduped.length;
+    this.edges = deduped;
+    return dropped;
   }
 
   /**

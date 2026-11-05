@@ -170,6 +170,37 @@ describe("KnowledgeGraph", () => {
     assert.equal(KnowledgeGraph.fromJSON({ nodes: json.nodes, edges: json.edges }).isDirected, false);
   });
 
+  it("collapses edges that call resolution folds onto one key", () => {
+    const nodes = (): ExtractionResult["nodes"] => [
+      { id: "svc_handle", label: "Svc.handle", type: "method", sourceFile: "src/Svc.php" },
+      { id: "user_wherein", label: "User.whereIn", type: "method", sourceFile: "app/User.php" },
+      { id: "stub_wherein", label: "whereIn", type: "method", sourceFile: "" },
+    ];
+
+    // Force build: the call row is already resolved to the method id.
+    const kg = KnowledgeGraph.fromExtraction({
+      nodes: nodes(),
+      edges: [{ source: "svc_handle", target: "user_wherein", relation: "calls", confidence: "INFERRED" }],
+    });
+
+    // Update build: the same extraction re-enters with the raw target, which
+    // merge() cannot match against the resolved row, so both rows coexist.
+    kg.merge({
+      nodes: nodes(),
+      edges: [{ source: "svc_handle", target: "stub_wherein", relation: "calls", confidence: "INFERRED" }],
+    });
+    assert.equal(kg.edges.length, 2, "raw and resolved rows coexist before resolution");
+
+    // resolveCalls() then retargets the raw row onto the same method id.
+    for (const edge of kg.edges) {
+      if (edge.target === "stub_wherein") edge.target = "user_wherein";
+    }
+
+    assert.equal(kg.dedupeEdges(), 1, "the folded duplicate must be dropped");
+    assert.equal(kg.edges.length, 1);
+    assert.equal(kg.dedupeEdges(), 0, "deduplication must be idempotent");
+  });
+
   it("assigns finite centrality to an isolated test node", () => {    const kg = KnowledgeGraph.fromExtraction({
       nodes: [
         { id: "mod_a", label: "moduleA", type: "file", sourceFile: "a.ts" },

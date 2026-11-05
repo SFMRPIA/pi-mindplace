@@ -100,7 +100,7 @@ function detectProjects(root: string): ProjectInfo[] {
 async function buildSingleProject(
   root: string,
   force: boolean,
-  directed: boolean,
+  directed: boolean | undefined,
   noViz: boolean,
   noReport: boolean,
   update: boolean,
@@ -210,7 +210,7 @@ async function buildSingleProject(
       `| Nodes | ${stats.nodeCount} |`,
       `| Edges | ${stats.edgeCount} |`,
       `| Communities | ${stats.communityCount} |`,
-      `| Mode | ${directed ? "directed" : "undirected"} |`,
+      `| Mode | ${kg.isDirected ? "directed" : "undirected"} |`,
     ];
 
     if (reportPath) outputs.push(`| Report | \`${OUT_DIR}/GRAPH_REPORT.md\` |`);
@@ -303,7 +303,7 @@ export const MindplaceBuildTool = {
             const result = await buildSingleProject(
               proj.path,
               params.force ?? false,
-              params.directed ?? false,
+              params.directed,
               params.noViz ?? false,
               params.noReport ?? false,
               params.update ?? false,
@@ -345,7 +345,7 @@ export const MindplaceBuildTool = {
     const single = await buildSingleProject(
       root,
       params.force ?? false,
-      params.directed ?? false,
+      params.directed,
       params.noViz ?? false,
       params.noReport ?? false,
       params.update ?? false,

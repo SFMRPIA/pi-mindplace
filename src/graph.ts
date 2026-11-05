@@ -389,16 +389,21 @@ export class KnowledgeGraph {
     return {
       nodes: [...this.nodes.values()],
       edges: this.edges,
+      isDirected: this.isDirected,
     };
   }
 
   /**
    * Deserialize from JSON.
-   * `directed` must be passed through: `merge()` derives edge-dedup keys from
-   * `isDirected`, so an update build that reloads undirected dedups differently
-   * than the build that produced the file.
+   * Resolution order for the directed flag: explicit argument → persisted
+   * `isDirected` → `false`. `merge()` derives edge-dedup keys from
+   * `isDirected`, so callers that reload for merging (refresh, update builds)
+   * must not silently downgrade a directed graph to undirected.
    */
-  static fromJSON(data: { nodes: GraphNode[]; edges: GraphEdge[] }, directed: boolean = false): KnowledgeGraph {
-    return KnowledgeGraph.fromExtraction(data, directed);
+  static fromJSON(
+    data: { nodes: GraphNode[]; edges: GraphEdge[]; isDirected?: boolean },
+    directed?: boolean,
+  ): KnowledgeGraph {
+    return KnowledgeGraph.fromExtraction(data, directed ?? data.isDirected ?? false);
   }
 }

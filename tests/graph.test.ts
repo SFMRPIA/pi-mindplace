@@ -152,12 +152,25 @@ describe("KnowledgeGraph", () => {
     assert.equal(reloaded.isDirected, true, "directed flag must survive fromJSON");
     assert.equal(reloaded.edges.length, built.edges.length, "edge count must survive the round-trip");
 
-    // Default stays undirected for the six one-argument callers.
-    assert.equal(KnowledgeGraph.fromJSON(JSON.parse(JSON.stringify(built.toJSON()))).isDirected, false);
+    // One-argument reloads now inherit the persisted flag (refresh reloads
+    // this way), so a directed graph stays directed without passing the arg.
+    assert.equal(KnowledgeGraph.fromJSON(JSON.parse(JSON.stringify(built.toJSON()))).isDirected, true);
   });
 
-  it("assigns finite centrality to an isolated test node", () => {
-    const kg = KnowledgeGraph.fromExtraction({
+  it("persists isDirected through toJSON and prefers an explicit argument", () => {
+    const built = KnowledgeGraph.fromExtraction(sampleExtraction(), true);
+    const json = JSON.parse(JSON.stringify(built.toJSON()));
+
+    assert.equal(json.isDirected, true, "toJSON must persist the directed mode");
+    // No argument: the persisted flag wins — this is how refresh reloads.
+    assert.equal(KnowledgeGraph.fromJSON(json).isDirected, true);
+    // Explicit argument overrides the persisted flag.
+    assert.equal(KnowledgeGraph.fromJSON(json, false).isDirected, false);
+    // Legacy graph.json written before the field existed.
+    assert.equal(KnowledgeGraph.fromJSON({ nodes: json.nodes, edges: json.edges }).isDirected, false);
+  });
+
+  it("assigns finite centrality to an isolated test node", () => {    const kg = KnowledgeGraph.fromExtraction({
       nodes: [
         { id: "mod_a", label: "moduleA", type: "file", sourceFile: "a.ts" },
         { id: "a_login", label: "login", type: "function", sourceFile: "a.ts", sourceLocation: "L10" },

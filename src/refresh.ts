@@ -110,7 +110,11 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
 
     // Build class index and resolve cross-file calls
     const classIndex = buildClassIndex(root, kg);
-    const resolvedCount = resolveCalls(kg, classIndex);
+    resolveCalls(kg, classIndex);
+    // Retargeting runs after merge()'s dedup, so a raw call row and its
+    // already-resolved twin can fold onto one key — the same trap build.ts
+    // fixes. Without this, a watcher/incremental sync persists duplicates.
+    kg.dedupeEdges();
     saveClassIndex(root, classIndex);
 
     // Build FTS5 search index (after routes + resolved calls)

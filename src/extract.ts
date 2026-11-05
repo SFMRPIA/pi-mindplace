@@ -63,6 +63,22 @@ function getNodeGypBin(): string | null {
 }
 function grammarPackageDir(spec: GrammarSpec): string | null { const pkgName = spec.module.split("/")[0]; try { return dirname(_require.resolve(`${pkgName}/package.json`)); } catch { return null; } }
 function buildGrammar(spec: GrammarSpec): boolean { const pkgDir = grammarPackageDir(spec); const nodeGyp = getNodeGypBin(); if (!pkgDir || !nodeGyp) return false; try { const res = spawnSync(process.execPath, [nodeGyp, "rebuild"], { cwd: pkgDir, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8", timeout: BUILD_TIMEOUT_MS, windowsHide: true }); return res.status === 0; } catch { return false; } }
+/**
+ * Resolve a grammar package's language handle.
+ * Most packages export the handle itself; some wrap it ({ language }) and
+ * tree-sitter-php exports { php, php_only }. Probe the module first so the
+ * already-working grammars keep resolving to the exact same handle, then fall
+ * back to its values — PHP lands on `php` (full markup) before `php_only`.
+ */
+function resolveLanguageHandle(mod: unknown): Grammar | null {
+  const probe = new Parser();
+  const candidates: unknown[] = [mod];
+  if (mod && typeof mod === "object") candidates.push(...Object.values(mod as Record<string, unknown>));
+  for (const candidate of candidates) {
+    try { probe.setLanguage(candidate as Grammar); return candidate as Grammar; } catch { /* try next */ }
+  }
+  return null;
+}
 function loadGrammar(spec: GrammarSpec): LoadedGrammar | null {
   const key = spec.module; if (grammarCache.has(key)) return grammarCache.get(key) ?? null;
   // SAFETY: tree-sitter grammar packages export a native language handle with
@@ -70,7 +86,7 @@ function loadGrammar(spec: GrammarSpec): LoadedGrammar | null {
   // `Grammar` can be proven here. The contract is enforced downstream by
   // `parser.setLanguage(grammar)` — a bad handle throws and the caller falls
   // back to a bare file node.
-  const tryLoad = (): LoadedGrammar | null => { try { const grammar = _require(spec.module) as unknown as Grammar; return { grammar, exts: new Set(spec.exts) }; } catch { return null; } };
+  const tryLoad = (): LoadedGrammar | null => { try { const grammar = resolveLanguageHandle(_require(spec.module)); return grammar ? { grammar, exts: new Set(spec.exts) } : null; } catch { return null; } };
   let loaded = tryLoad(); if (!loaded && buildGrammar(spec)) loaded = tryLoad();
   if (loaded) { grammarCache.set(key, loaded); return loaded; }
   grammarCache.set(key, null); if (!grammarWarned.has(key)) { grammarWarned.add(key); console.warn(`[pi-mindplace] Grammar "${spec.module}" unavailable — files ${spec.exts.join(", ")} will be skipped.`); }
@@ -933,28 +949,20 @@ function extractFile(filePath: string, root: string): ExtractionResult {
       return extractBash(filePath, source, root);
     case "json":
       return extractJson(filePath, source, root);
-    case "php":
+    case "php": {
       const tsResult = extractPhp(filePath, source, tree);
-      // PHP-Parser is expensive (~190ms per file). Skip for small files (<10KB)
-      // where tree-sitter handles structure and basic calls well enough.
-      if (source.length < 10_000) {
-        return tsResult;
-      }
-      // Dual-pass for larger files: tree-sitter (structure) + PHP-Parser (calls/imports)
+      // PHP-Parser (subprocess) is authoritative for PHP. Measured on real
+      // files it is a strict superset of the tree-sitter pass — 39 vs 8 nodes
+      // and 38 vs 31 calls on a 4KB command — because tree-sitter emits no
+      // `call` nodes for PHP and misses namespaces. The old <10KB shortcut
+      // returning tree-sitter alone was therefore unreachable-but-harmful:
+      // with a working grammar it would have silently thinned small files.
+      // Fall back to tree-sitter only when the binary yields nothing (e.g. no
+      // php on PATH), so a missing binary degrades instead of emptying out.
       const ppResult = extractPhpViaSubprocess(filePath, absPath);
-      const mergedNodes = [...tsResult.nodes];
-      const seenNodeIds = new Set(tsResult.nodes.map(n => n.id));
-      for (const n of ppResult.nodes) {
-        if (!seenNodeIds.has(n.id)) {
-          mergedNodes.push(n);
-          seenNodeIds.add(n.id);
-        }
-      }
-      const mergedEdges = [
-        ...tsResult.edges.filter(e => e.relation !== "calls" && e.relation !== "imports"),
-        ...ppResult.edges.filter(e => e.relation === "calls" || e.relation === "imports" || e.relation === "inherits" || e.relation === "implements"),
-      ];
-      return { nodes: mergedNodes, edges: mergedEdges };
+      if (ppResult.nodes.length > 0) return ppResult;
+      return tsResult;
+    }
     case "java":
     case "rust":
     case "cpp":

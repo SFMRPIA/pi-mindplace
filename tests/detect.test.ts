@@ -5,7 +5,7 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { detect } from "../src/detect.ts";
-import { resolve, join } from "node:path";
+import { resolve, join, isAbsolute } from "node:path";
 
 const FIXTURES = resolve(import.meta.dirname ?? ".", "fixtures", "sample-project");
 
@@ -29,7 +29,7 @@ describe("detect", () => {
 
   it("returns absolute root path", () => {
     const result = detect(FIXTURES);
-    assert.ok(result.root.startsWith("/"), "root should be absolute");
+    assert.ok(isAbsolute(result.root), `root should be absolute, got ${result.root}`);
   });
 
   it("throws on non-existent path", () => {

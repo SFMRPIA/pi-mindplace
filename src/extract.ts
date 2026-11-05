@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve, join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -573,8 +573,12 @@ function extractPhpViaSubprocess(filePath: string, absPath: string): ExtractionR
     // php-extract.php emits the same node IDs as tree-sitter — the dual-pass
     // merge in extract() then deduplicates instead of keeping two copies.
     const relPath = filePath.replace(/\\/g, "/");
-    const stdout = execSync(
-      `php "${scriptPath}" "${absPath}" "${relPath}"`,
+    // execFileSync (not execSync) so the file paths are passed as argv rather
+    // than interpolated into a shell string — no quoting to escape, and paths
+    // containing spaces or quotes stay intact.
+    const stdout = execFileSync(
+      "php",
+      [scriptPath, absPath, relPath],
       { timeout: 10000, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" }
     );
 

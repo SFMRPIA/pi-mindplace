@@ -5,7 +5,7 @@
  * controller method nodes.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { GraphNode, GraphEdge } from "./types.ts";
@@ -138,9 +138,14 @@ function extractRoutesForProject(
   let stdout: string | null = null;
   for (const candidate of phpBin) {
     try {
-      stdout = execSync(`"${candidate}" -d error_reporting=0 artisan route:list --json`, {
-        cwd: root, timeout: 15000, encoding: "utf-8", maxBuffer: 5 * 1024 * 1024,
-      });
+      // execFileSync (not execSync): the old shell string interpolated the
+      // candidate path, so a quote in LARAGON_DIR or the project path could
+      // break out of the quoting. An argv array has no shell to escape.
+      stdout = execFileSync(
+        candidate,
+        ["-d", "error_reporting=0", "artisan", "route:list", "--json"],
+        { cwd: root, timeout: 15000, encoding: "utf-8", maxBuffer: 5 * 1024 * 1024 },
+      );
       break;  // first success
     } catch { /* try next */ }
   }

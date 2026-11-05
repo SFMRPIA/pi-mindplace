@@ -141,4 +141,37 @@ describe("KnowledgeGraph", () => {
     kg.merge(reverse);
     assert.equal(kg.edges.length, edgeCount + 1, "A→B and B→A must collapse to one row");
   });
+
+  it("preserves the directed flag through fromJSON", () => {
+    const built = KnowledgeGraph.fromExtraction(sampleExtraction(), true);
+    const reloaded = KnowledgeGraph.fromJSON(JSON.parse(JSON.stringify(built.toJSON())), true);
+
+    // merge() derives its edge-dedup key from isDirected, so an update build
+    // that reloaded undirected would dedup differently than the build that
+    // wrote the file.
+    assert.equal(reloaded.isDirected, true, "directed flag must survive fromJSON");
+    assert.equal(reloaded.edges.length, built.edges.length, "edge count must survive the round-trip");
+
+    // Default stays undirected for the six one-argument callers.
+    assert.equal(KnowledgeGraph.fromJSON(JSON.parse(JSON.stringify(built.toJSON()))).isDirected, false);
+  });
+
+  it("assigns finite centrality to an isolated test node", () => {
+    const kg = KnowledgeGraph.fromExtraction({
+      nodes: [
+        { id: "mod_a", label: "moduleA", type: "file", sourceFile: "a.ts" },
+        { id: "a_login", label: "login", type: "function", sourceFile: "a.ts", sourceLocation: "L10" },
+        { id: "orphan", label: "orphanSuite", type: "file", sourceFile: "tests/orphan.test.ts" },
+      ],
+      edges: [
+        { source: "mod_a", target: "a_login", relation: "contains", confidence: "EXTRACTED" as const },
+      ],
+    });
+
+    kg.computeCentrality();
+
+    const orphan = kg.nodes.get("orphan");
+    assert.ok(orphan, "isolated node must exist");
+    assert.equal(Number.isFinite(orphan.centrality), true, "isolated test node centrality must be a number, not NaN");
+  });
 });

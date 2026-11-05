@@ -13,6 +13,25 @@ import type { GraphNode, GraphEdge } from "./types.ts";
 export interface RouteExtractionResult {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /**
+   * One entry per project that returned a parseable route list.
+   *
+   * Callers must *replace* these in the graph instead of merging them:
+   * route node IDs are a sequential counter over `artisan route:list`, so an
+   * additive merge duplicates every route whose position moved and keeps
+   * nodes for deleted or re-pointed routes. A project whose artisan run failed
+   * (or whose JSON did not parse) is absent here — its last known routes stay
+   * in the graph rather than being wiped by a transient failure.
+   */
+  sources: RouteSourceResult[];
+}
+
+/** Route nodes/edges of a single successfully extracted Laravel project. */
+export interface RouteSourceResult {
+  /** Node-ID prefix for the project ("" when the scan root itself is the app). */
+  prefix: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }
 
 /** A directory that looks like a real Laravel app (composer.json + artisan). */
@@ -78,6 +97,7 @@ function phpBinaries(): string[] {
 export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const sources: RouteSourceResult[] = [];
 
   // Build an index of existing method nodes for quick lookup
   const methodIndex = new Map<string, GraphNode>();
@@ -89,21 +109,31 @@ export function extractRoutes(root: string, existingNodes: GraphNode[]): RouteEx
 
   const phpBin = phpBinaries();
   for (const { dir, prefix } of laravelCandidates(root)) {
-    extractRoutesForProject(dir, prefix, methodIndex, phpBin, nodes, edges);
+    const source = extractRoutesForProject(dir, prefix, methodIndex, phpBin);
+    // No source means the extraction failed — leave that project's existing
+    // route nodes untouched rather than reporting an empty (successful) list.
+    if (!source) continue;
+    sources.push(source);
+    nodes.push(...source.nodes);
+    edges.push(...source.edges);
   }
 
-  return { nodes, edges };
+  return { nodes, edges, sources };
 }
 
-/** Run `php artisan route:list --json` in one Laravel dir; append nodes/edges. */
+/**
+ * Run `php artisan route:list --json` in one Laravel dir.
+ * Returns null when artisan could not be run or its output did not parse —
+ * an empty array is a *successful* extraction of zero routes.
+ */
 function extractRoutesForProject(
   root: string,
   prefix: string,
   methodIndex: Map<string, GraphNode>,
   phpBin: string[],
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-): void {
+): RouteSourceResult | null {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
   let stdout: string | null = null;
   for (const candidate of phpBin) {
     try {
@@ -114,7 +144,7 @@ function extractRoutesForProject(
     } catch { /* try next */ }
   }
 
-  if (!stdout) return;
+  if (!stdout) return null;
 
   let routes: Array<{
     method: string;
@@ -126,8 +156,9 @@ function extractRoutesForProject(
   try {
     routes = JSON.parse(stdout);
   } catch {
-    return;
+    return null;
   }
+  if (!Array.isArray(routes)) return null;
 
   let routeCounter = 0;
 
@@ -192,4 +223,6 @@ function extractRoutesForProject(
       }
     }
   }
+
+  return { prefix, nodes, edges };
 }

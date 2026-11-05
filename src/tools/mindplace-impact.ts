@@ -6,7 +6,7 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { KnowledgeGraph } from "../graph.ts";
 import type { GraphNode } from "../types.ts";
@@ -147,6 +147,15 @@ function findNodeByLabel(kg: KnowledgeGraph, label: string): GraphNode | undefin
 
 // ── Tool definition ───────────────────────────────────────────────────────────
 
+/** Shapes reported to the UI/codemode via `details` (all optional — error paths report less). */
+interface ImpactDetails {
+  graphExists?: boolean;
+  symbolFound?: boolean;
+  dependentCount?: number;
+  truncated?: boolean;
+  error?: string;
+}
+
 export const MindplaceImpactTool = {
   name: "mindplace_impact",
   label: "Impact Analysis",
@@ -175,7 +184,7 @@ export const MindplaceImpactTool = {
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
-  ) {
+  ): Promise<AgentToolResult<ImpactDetails>> {
     const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
     const maxDepth = Math.min(params.depth ?? 2, 5);
     const maxResults = 50;
@@ -188,6 +197,7 @@ export const MindplaceImpactTool = {
       return {
         content: [{ type: "text" as const, text: "No graph found. Run mindplace_build first." }],
         isError: true,
+        details: { graphExists: false },
       };
     }
 
@@ -199,6 +209,7 @@ export const MindplaceImpactTool = {
       return {
         content: [{ type: "text" as const, text: `Failed to load graph: ${err}` }],
         isError: true,
+        details: { error: String(err) },
       };
     }
 
@@ -209,6 +220,7 @@ export const MindplaceImpactTool = {
       return {
         content: [{ type: "text" as const, text: `Symbol "${params.symbol}" not found in the graph. Try a different name or use mindplace_search first.` }],
         isError: true,
+        details: { graphExists: true, symbolFound: false },
       };
     }
 
@@ -253,6 +265,12 @@ export const MindplaceImpactTool = {
         type: "text" as const,
         text: stalenessBanner(root) + lines.join("\n") + buildSourceSnippets(root, [targetNode], 1200),
       }],
+      details: {
+        graphExists: true,
+        symbolFound: true,
+        dependentCount: tree.children.length,
+        truncated: tree.children.length >= maxResults,
+      },
     };
   },
 };

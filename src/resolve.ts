@@ -12,7 +12,7 @@
  * - Other → leave unresolved
  */
 
-import type { KnowledgeGraph } from "./types.ts";
+import type { KnowledgeGraph } from "./graph.ts";
 import type { ClassIndex } from "./class-index.ts";
 import { resolveShortName } from "./class-index.ts";
 

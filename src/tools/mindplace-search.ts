@@ -3,12 +3,18 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { searchIndex, searchDbPath } from "../search.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
 import { findGraphRoot } from "../paths.ts";
 import { stalenessBanner } from "../watcher.ts";
 import { existsSync } from "node:fs";
+
+/** Shapes reported to the UI/codemode via `details` (all optional — error paths report less). */
+interface SearchDetails {
+  resultCount?: number;
+  error?: string;
+}
 
 export const MindplaceSearchTool = {
   name: "mindplace_search",
@@ -38,7 +44,7 @@ export const MindplaceSearchTool = {
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
-  ) {
+  ): Promise<AgentToolResult<SearchDetails>> {
     const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
 
     // Auto-refresh graph if stale (routes, new files, etc.)
@@ -53,6 +59,7 @@ export const MindplaceSearchTool = {
           },
         ],
         isError: true,
+        details: { error: "No search index found" },
       };
     }
 
@@ -66,6 +73,7 @@ export const MindplaceSearchTool = {
             text: `No results for "${params.query}". Try different terms or use wildcards (e.g., "${params.query}*").`,
           },
         ],
+        details: { resultCount: 0 },
       };
     }
 

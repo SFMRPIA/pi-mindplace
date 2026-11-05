@@ -43,7 +43,13 @@ const GRAMMAR_SPECS: GrammarSpec[] = [
   { module: "tree-sitter-scala", exts: [".scala", ".sc"] },
   { module: "tree-sitter-php", exts: [".php", ".phtml"] },
 ];
-interface LoadedGrammar { grammar: Parser.Language; exts: Set<string>; }
+/**
+ * Tree-sitter language handle.
+ * The installed `tree-sitter@0.21` typings declare no `Parser.Language`
+ * namespace, so spell the type from the API instead of guessing a name.
+ */
+type Grammar = ReturnType<Parser["getLanguage"]>;
+interface LoadedGrammar { grammar: Grammar; exts: Set<string>; }
 const grammarCache = new Map<string, LoadedGrammar | null>();
 const grammarWarned = new Set<string>();
 const BUILD_TIMEOUT_MS = 180_000;
@@ -51,7 +57,7 @@ let nodeGypBinCache: string | null | undefined;
 function getNodeGypBin(): string | null {
   if (nodeGypBinCache !== undefined) return nodeGypBinCache;
   nodeGypBinCache = null;
-  try { const pkgJson = _require.resolve("node-gyp/package.json"); const pkg = _require(pkgJson) as { bin?: string | Record<string, string> }; const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["node-gyp"]; if (bin) { nodeGypBinCache = join(dirname(pkgJson), bin); return nodeGypBinCache; } } catch {}
+  try { const pkgJson = _require.resolve("node-gyp/package.json"); const pkg = _require(pkgJson) as { bin?: string | Record<string, string> }; const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["node-gyp"]; if (bin) { nodeGypBinCache = join(dirname(pkgJson), bin); return nodeGypBinCache; } } catch { /* node-gyp not resolvable locally — try the global npm root below */ }
   try { const res = spawnSync("npm", ["root", "-g"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }); if (res.status === 0) { const npmRoot = (res.stdout || "").trim(); for (const cand of [join(npmRoot, "npm", "node_modules", "node-gyp", "bin", "node-gyp.js"), join(npmRoot, "node-gyp", "bin", "node-gyp.js")]) if (existsSync(cand)) { nodeGypBinCache = cand; return cand; } } } catch {}
   return null;
 }
@@ -59,7 +65,12 @@ function grammarPackageDir(spec: GrammarSpec): string | null { const pkgName = s
 function buildGrammar(spec: GrammarSpec): boolean { const pkgDir = grammarPackageDir(spec); const nodeGyp = getNodeGypBin(); if (!pkgDir || !nodeGyp) return false; try { const res = spawnSync(process.execPath, [nodeGyp, "rebuild"], { cwd: pkgDir, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8", timeout: BUILD_TIMEOUT_MS, windowsHide: true }); return res.status === 0; } catch { return false; } }
 function loadGrammar(spec: GrammarSpec): LoadedGrammar | null {
   const key = spec.module; if (grammarCache.has(key)) return grammarCache.get(key) ?? null;
-  const tryLoad = (): LoadedGrammar | null => { try { const grammar = _require(spec.module) as unknown as Parser.Language; return { grammar, exts: new Set(spec.exts) }; } catch { return null; } };
+  // SAFETY: tree-sitter grammar packages export a native language handle with
+  // no type declarations on the `require()` result, so neither `unknown` nor
+  // `Grammar` can be proven here. The contract is enforced downstream by
+  // `parser.setLanguage(grammar)` — a bad handle throws and the caller falls
+  // back to a bare file node.
+  const tryLoad = (): LoadedGrammar | null => { try { const grammar = _require(spec.module) as unknown as Grammar; return { grammar, exts: new Set(spec.exts) }; } catch { return null; } };
   let loaded = tryLoad(); if (!loaded && buildGrammar(spec)) loaded = tryLoad();
   if (loaded) { grammarCache.set(key, loaded); return loaded; }
   grammarCache.set(key, null); if (!grammarWarned.has(key)) { grammarWarned.add(key); console.warn(`[pi-mindplace] Grammar "${spec.module}" unavailable — files ${spec.exts.join(", ")} will be skipped.`); }
@@ -106,17 +117,22 @@ export function nodeId(file: string, name: string): string {
   return `${clean}_${safeName}`;
 }
 
-function pickGrammar(file: string): Parser.Language | null {
-  const ext = file.includes(".") ? file.slice(file.lastIndexOf(".")) : "";
+/** Language handle for a file extension (cached, self-building — see loadGrammar). */
+function grammarForExt(ext: string): Grammar | null {
   for (const spec of GRAMMAR_SPECS) {
     if (spec.exts.includes(ext)) return loadGrammar(spec)?.grammar ?? null;
   }
   return null;
 }
 
+function pickGrammar(file: string): Grammar | null {
+  const ext = file.includes(".") ? file.slice(file.lastIndexOf(".")) : "";
+  return grammarForExt(ext);
+}
+
 // ── JS/TS Extraction ──────────────────────────────────────────────────────────
 
-function extractJS_TS(filePath: string, source: string, root: string, tree: Parser.Tree): ExtractionResult {
+function extractJS_TS(filePath: string, _source: string, root: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenIds = new Set<string>();
@@ -239,7 +255,7 @@ function extractJS_TS(filePath: string, source: string, root: string, tree: Pars
 
 // ── Python Extraction ─────────────────────────────────────────────────────────
 
-function extractPython(filePath: string, source: string, _root: string, tree: Parser.Tree): ExtractionResult {
+function extractPython(filePath: string, _source: string, _root: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenIds = new Set<string>();
@@ -345,7 +361,7 @@ function extractPython(filePath: string, source: string, _root: string, tree: Pa
 
 // ── Go Extraction ─────────────────────────────────────────────────────────────
 
-function extractGo(filePath: string, source: string, _root: string, tree: Parser.Tree): ExtractionResult {
+function extractGo(filePath: string, _source: string, _root: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenIds = new Set<string>();
@@ -462,7 +478,7 @@ function extractJson(filePath: string, source: string, _root: string): Extractio
 /** Node types that represent named definitions across languages */
 const CALL_EXPR_TYPES = new Set(["call_expression", "method_invocation", "call"]);
 
-function extractGeneric(filePath: string, source: string, tree: Parser.Tree): ExtractionResult {
+function extractGeneric(filePath: string, _source: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenIds = new Set<string>();
@@ -579,7 +595,7 @@ function extractPhpViaSubprocess(filePath: string, absPath: string): ExtractionR
 // ── PHP Extraction ───────────────────────────────────────────────────────────
 // ── PHP Extraction ───────────────────────────────────────────────────────────// ── PHP Extraction ───────────────────────────────────────────────────────────// ── PHP Extraction ───────────────────────────────────────────────────────────
 
-function extractPhp(filePath: string, source: string, tree: Parser.Tree): ExtractionResult {
+function extractPhp(filePath: string, _source: string, tree: Parser.Tree): ExtractionResult {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const seenIds = new Set<string>();
@@ -802,71 +818,47 @@ function extractPhp(filePath: string, source: string, tree: Parser.Tree): Extrac
  * Parses the <script> block with the JavaScript/TypeScript extractor.
  */
 function extractVue(filePath: string, source: string, root: string): ExtractionResult {
+  // Every failure path degrades to a bare file node — never throw, never drop
+  // the file from the graph entirely.
+  const fileOnly = (): ExtractionResult => ({
+    nodes: [{
+      id: nodeId(filePath, "file"),
+      label: filePath,
+      type: "file",
+      sourceFile: filePath,
+    }],
+    edges: [],
+  });
+
   // Extract script block content
   const scriptMatch = source.match(/<script[^>]*>([\s\S]*?)<\/script>/);
-  if (!scriptMatch) {
-    // No script block — just create a file node
-    return {
-      nodes: [{
-        id: nodeId(filePath, "file"),
-        label: filePath,
-        type: "file",
-        sourceFile: filePath,
-      }],
-      edges: [],
-    };
-  }
+  if (!scriptMatch) return fileOnly();
 
   const scriptContent = scriptMatch[1].trim();
-  if (!scriptContent) {
-    return {
-      nodes: [{
-        id: nodeId(filePath, "file"),
-        label: filePath,
-        type: "file",
-        sourceFile: filePath,
-      }],
-      edges: [],
-    };
-  }
+  if (!scriptContent) return fileOnly();
 
-  // Check if TypeScript
-  const isTS = /lang="ts"/.test(scriptMatch[0]);
+  // The script language lives in the tag attribute (`lang="ts"`,
+  // `lang='tsx'`, `lang="ts" setup`, ...). TSX/JSX must be tested before `ts`,
+  // otherwise JSX syntax is parsed as plain TypeScript and fails.
+  const langAttr = scriptMatch[0]
+    .match(/\blang\s*=\s*["']?([a-zA-Z0-9]+)/)?.[1]?.toLowerCase();
+  const scriptExt = langAttr === "tsx" || langAttr === "jsx" ? ".tsx"
+    : langAttr === "ts" ? ".ts"
+    : ".js";
 
-  // Set up the JavaScript (or TypeScript) parser
+  const grammar = grammarForExt(scriptExt);
+  // Grammar unavailable (not built on this platform) — loadGrammar already
+  // warned once per module.
+  if (!grammar) return fileOnly();
+
   const jsParser = new Parser();
-  try {
-    if (isTS) {
-      jsParser.setLanguage(TsLang as unknown as Parser.Language);
-    } else {
-      jsParser.setLanguage(JavaScript as unknown as Parser.Language);
-    }
-  } catch {
-    return {
-      nodes: [{
-        id: nodeId(filePath, "file"),
-        label: filePath,
-        type: "file",
-        sourceFile: filePath,
-      }],
-      edges: [],
-    };
-  }
-
   let scriptTree: Parser.Tree;
   try {
+    jsParser.setLanguage(grammar);
     scriptTree = jsParser.parse(scriptContent);
   } catch {
     // Tree-sitter C parser can crash on malformed script content
-    return {
-      nodes: [{
-        id: nodeId(filePath, "file"),
-        label: filePath,
-        type: "file",
-        sourceFile: filePath,
-      }],
-      edges: [],
-    };
+    return fileOnly();
   }
 
   // Use the JS/TS extractor on the script content — pass the original filePath for consistent IDs
@@ -903,16 +895,16 @@ function extractFile(filePath: string, root: string): ExtractionResult {
 
   const source = readFileSync(absPath, "utf-8");
 
-  let tree: Parser.Tree;
-  let parseFailed = false;
+  let tree: Parser.Tree | undefined;
   try {
     parser.setLanguage(grammar);
     tree = parser.parse(source);
   } catch {
-    parseFailed = true;
+    // Malformed source or a broken grammar — handled by the fallbacks below
+    tree = undefined;
   }
 
-  if (parseFailed) {
+  if (!tree) {
     // For PHP files that fail tree-sitter (large files), use regex fallback
     if (lang === "php") {
       return extractPhpViaSubprocess(filePath, absPath);

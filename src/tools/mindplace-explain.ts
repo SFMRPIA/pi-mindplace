@@ -3,7 +3,7 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync } from "node:fs";
 
 import { KnowledgeGraph } from "../graph.ts";
@@ -12,6 +12,16 @@ import { refreshGraphIfStale } from "../refresh.ts";
 import { findGraphRoot, graphPath } from "../paths.ts";
 import { stalenessBanner } from "../watcher.ts";
 import { buildSourceSnippets } from "../query.ts";
+
+/** Shapes reported to the UI/codemode via `details` (all optional — error paths report less). */
+interface ExplainDetails {
+  graphExists?: boolean;
+  matchesFound?: number;
+  matchesTotal?: number;
+  nodeId?: string;
+  connections?: number;
+  error?: string;
+}
 
 export const MindplaceExplainTool = {
   name: "mindplace_explain",
@@ -35,7 +45,7 @@ export const MindplaceExplainTool = {
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
-  ) {
+  ): Promise<AgentToolResult<ExplainDetails>> {
     const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
 
     // Auto-refresh graph if stale before explaining

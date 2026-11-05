@@ -3,7 +3,7 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, existsSync } from "node:fs";
 
 import { KnowledgeGraph } from "../graph.ts";
@@ -11,6 +11,16 @@ import { query, formatQueryResult, buildSourceSnippets } from "../query.ts";
 import { refreshGraphIfStale } from "../refresh.ts";
 import { findGraphRoot, graphPath } from "../paths.ts";
 import { stalenessBanner } from "../watcher.ts";
+
+/** Shapes reported to the UI/codemode via `details` (all optional — error paths report less). */
+interface QueryDetails {
+  graphExists?: boolean;
+  nodesReturned?: number;
+  tokensUsed?: number;
+  budget?: number;
+  coverage?: number;
+  error?: string;
+}
 
 export const MindplaceQueryTool = {
   name: "mindplace_query",
@@ -49,7 +59,7 @@ export const MindplaceQueryTool = {
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
-  ) {
+  ): Promise<AgentToolResult<QueryDetails>> {
     const root = params.path ?? findGraphRoot(ctx.cwd) ?? ctx.cwd;
 
     // Auto-refresh graph if stale before querying

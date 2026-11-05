@@ -95,6 +95,57 @@ export class KnowledgeGraph {
     }
   }
 
+  /**
+   * Replace one Laravel project's route subgraph (drop, then merge the fresh
+   * extraction). `merge()` is additive and route IDs are a sequential counter
+   * over `artisan route:list`, so merging a re-extracted route list would
+   * duplicate every route whose position shifted, keep nodes for deleted
+   * routes, and keep the previous target when a route's action changed.
+   *
+   * Only projects that extracted successfully are passed here (see
+   * routes.extractRoutes), so a transient artisan failure leaves the last known
+   * routes in place instead of wiping them.
+   */
+  replaceRouteSource(prefix: string, result: ExtractionResult): void {
+    // Route extraction owns `${prefix}route_<n>_...` route nodes and the
+    // shared `${prefix}route_controller_...` controller nodes. The type check
+    // keeps unrelated nodes (e.g. a real file named `routes`) out of the purge.
+    const ownedId = (id: string, type: string): boolean =>
+      (type === "route" || type === "controller") && id.startsWith(`${prefix}route_`);
+
+    const removed = new Set<string>();
+    for (const node of this.nodes.values()) {
+      if (ownedId(node.id, node.type)) removed.add(node.id);
+    }
+
+    if (removed.size > 0) {
+      for (const id of removed) {
+        this.nodes.delete(id);
+        this.adjacency.delete(id);
+        this.outgoing.delete(id);
+      }
+      // Drop edges touching the removed subgraph, then the dangling
+      // adjacency entries left behind on surviving nodes.
+      this.edges = this.edges.filter(e => !removed.has(e.source) && !removed.has(e.target));
+      for (const neighbors of this.adjacency.values()) {
+        for (const id of removed) neighbors.delete(id);
+      }
+      for (const targets of this.outgoing.values()) {
+        for (const id of removed) targets.delete(id);
+      }
+    }
+
+    this.merge(result);
+
+    // merge() maintains adjacency but not the directed outgoing index.
+    for (const edge of result.edges) {
+      if (!this.nodes.has(edge.source) || !this.nodes.has(edge.target)) continue;
+      const out = this.outgoing.get(edge.source) ?? new Set<string>();
+      out.add(edge.target);
+      this.outgoing.set(edge.source, out);
+    }
+  }
+
   /** Compute PageRank centrality scores (power iteration, no numpy needed) */
   computeCentrality(alpha: number = 0.85, epsilon: number = 1e-6, maxIter: number = 100): void {
     const N = this.nodes.size;
@@ -140,9 +191,11 @@ export class KnowledgeGraph {
     // De-weight test/spec nodes so ranking and god nodes reflect
     // production code. 0.1 keeps a weak signal — tune if tests matter.
     // (ponytail: pattern is path-based; a test outside tests/ dir isn't caught)
+    // `?? 0`: an isolated node (no edges) is never assigned a score above, so
+    // multiplying an undefined centrality would store NaN and poison ranking.
     for (const [, node] of this.nodes) {
       if (node.sourceFile && TEST_RE.test(node.sourceFile)) {
-        node.centrality = Math.round(node.centrality * 0.1 * 1000) / 1000;
+        node.centrality = Math.round((node.centrality ?? 0) * 0.1 * 1000) / 1000;
       }
     }
   }
@@ -339,8 +392,13 @@ export class KnowledgeGraph {
     };
   }
 
-  /** Deserialize from JSON */
-  static fromJSON(data: { nodes: GraphNode[]; edges: GraphEdge[] }): KnowledgeGraph {
-    return KnowledgeGraph.fromExtraction(data);
+  /**
+   * Deserialize from JSON.
+   * `directed` must be passed through: `merge()` derives edge-dedup keys from
+   * `isDirected`, so an update build that reloads undirected dedups differently
+   * than the build that produced the file.
+   */
+  static fromJSON(data: { nodes: GraphNode[]; edges: GraphEdge[] }, directed: boolean = false): KnowledgeGraph {
+    return KnowledgeGraph.fromExtraction(data, directed);
   }
 }

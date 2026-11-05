@@ -9,7 +9,7 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { detect } from "../detect.ts";
 import { extract } from "../extract.ts";
@@ -50,7 +50,6 @@ function detectProjects(root: string): ProjectInfo[] {
 
   // Check root itself for project markers
   const hasRootComposer = existsSync(join(root, "composer.json"));
-  const hasRootArtisan = existsSync(join(root, "artisan"));
   const hasRootPackage = existsSync(join(root, "package.json"));
 
   if (hasRootComposer || hasRootPackage) {
@@ -153,19 +152,18 @@ async function buildSingleProject(
       kg = KnowledgeGraph.fromExtraction(extResult, directed);
     }
 
-    // Step 4: Add Laravel route nodes (deduped merge — same as refresh)
+    // Step 4: Add Laravel route nodes. Each project's route subgraph is
+    // replaced rather than merged — an `update` build re-extracts the same
+    // routes with shifted sequential IDs, which an additive merge would
+    // duplicate (see KnowledgeGraph.replaceRouteSource).
     const routeResult = extractRoutes(root, [...kg.nodes.values()]);
-    kg.merge(routeResult);
-    for (const e of routeResult.edges) {
-      if (!kg.nodes.has(e.source)) continue;
-      const out = kg.outgoing.get(e.source) ?? new Set();
-      out.add(e.target);
-      kg.outgoing.set(e.source, out);
+    for (const source of routeResult.sources) {
+      kg.replaceRouteSource(source.prefix, source);
     }
 
     // Step 5: Build class index and resolve cross-file calls
     const classIndex = buildClassIndex(root, kg);
-    const resolvedCount = resolveCalls(kg, classIndex);
+    resolveCalls(kg, classIndex);
     saveClassIndex(root, classIndex);
 
     // Step 6: Build FTS5 search index
@@ -245,6 +243,25 @@ async function buildSingleProject(
 
 // ─── Tool definition ────────────────────────────────────────────────────
 
+/**
+ * Shapes reported to the UI/codemode via `details`.
+ * All optional because error/progress paths report different subsets.
+ * Index signature absorbs the `...kg.stats()` spread.
+ */
+interface BuildDetails {
+  skipped?: boolean;
+  totalFiles?: number;
+  cachedFiles?: number;
+  extractedFiles?: number;
+  stage?: string;
+  done?: number;
+  total?: number;
+  project?: string;
+  projectCount?: number;
+  error?: string;
+  [key: string]: unknown;
+}
+
 export const MindplaceBuildTool = {
   name: "mindplace_build",
   label: "Build Mind Place",
@@ -265,7 +282,7 @@ export const MindplaceBuildTool = {
     _signal: AbortSignal,
     _onUpdate: (update: unknown) => void,
     ctx: ExtensionContext,
-  ) {
+  ): Promise<AgentToolResult<BuildDetails>> {
     const root = params.path ?? ctx.cwd;
 
     // ── Monorepo auto-detection ──────────────────────────────────────
@@ -325,7 +342,7 @@ export const MindplaceBuildTool = {
     }
 
     // ── Single project build (explicit path, or only one project detected) ──
-    return await buildSingleProject(
+    const single = await buildSingleProject(
       root,
       params.force ?? false,
       params.directed ?? false,
@@ -334,5 +351,7 @@ export const MindplaceBuildTool = {
       params.update ?? false,
       _onUpdate,
     );
+    // `details` is required by AgentToolResult; helper paths may omit it.
+    return { ...single, details: single.details ?? {} };
   },
 };

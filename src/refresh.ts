@@ -97,8 +97,16 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
         : "initial build";
     }
 
-    // Always refresh routes — they can change without source file changes
+    // Always refresh routes — they can change without source file changes.
+    // Each successfully extracted project's route subgraph is *replaced*, not
+    // merged: route IDs are a sequential counter over `artisan route:list`, so
+    // an additive merge duplicates every route whose position moved and keeps
+    // stale nodes/edges for deleted or re-pointed routes. A project whose
+    // artisan run failed keeps its last known routes.
     const routeResult = extractRoutes(root, [...kg.nodes.values()]);
+    for (const source of routeResult.sources) {
+      kg.replaceRouteSource(source.prefix, source);
+    }
 
     // Build class index and resolve cross-file calls
     const classIndex = buildClassIndex(root, kg);
@@ -107,16 +115,6 @@ export async function refreshGraphIfStale(cwd: string): Promise<{ refreshed: boo
 
     // Build FTS5 search index (after routes + resolved calls)
     buildSearchIndex(root, kg);
-    // Route nodes/edges go through the deduped merge — re-running routes on
-    // every refresh must not grow the edges array (it used to add ~910
-    // duplicates per refresh).
-    kg.merge(routeResult);
-    for (const e of routeResult.edges) {
-      if (!kg.nodes.has(e.source)) continue;
-      const out = kg.outgoing.get(e.source) ?? new Set();
-      out.add(e.target);
-      kg.outgoing.set(e.source, out);
-    }
 
     kg.computeCentrality();
     kg.detectCommunities();

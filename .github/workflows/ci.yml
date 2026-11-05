@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -15,10 +19,14 @@ jobs:
         node-version: [24, 26]
 
     steps:
-      - uses: actions/checkout@v6
+      # Pinned to commit SHAs: a mutable tag can be silently repointed by the
+      # action owner. Comment records the tag each SHA was resolved from.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"

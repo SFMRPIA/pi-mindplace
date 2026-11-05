@@ -7,7 +7,7 @@
 
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { KnowledgeGraph } from "../graph.ts";
 import type { GraphNode } from "../types.ts";
 import { refreshGraphIfStale } from "../refresh.ts";

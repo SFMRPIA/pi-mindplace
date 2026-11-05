@@ -243,7 +243,23 @@ export function resolveShortName(
 
 const INDEX_FILE = "class-index.json";
 
-function serialize(index: ClassIndex): unknown {
+/** On-disk shape of class-index.json (Maps flattened to entry arrays). */
+interface SerializedClassIndex {
+  classes: Array<[
+    string,
+    {
+      name: string;
+      file: string;
+      namespce: string;
+      properties: Array<[string, PropertyInfo]>;
+      methods: Array<[string, MethodInfo]>;
+      imports: Array<[string, string]>;
+    },
+  ]>;
+  methodIndex: Array<[string, string[]]>;
+}
+
+function serialize(index: ClassIndex): SerializedClassIndex {
   return {
     classes: Array.from(index.classes.entries()).map(([k, v]) => [
       k,

@@ -83,7 +83,8 @@ function phpBinaries(): string[] {
         return readdirSync(`${root}/bin/php`, { withFileTypes: true })
           .filter(d => d.isDirectory() && d.name.startsWith("php-"))
           .map(d => `${root}/bin/php/${d.name}/php.exe`)
-          .sort().reverse();
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+          .toReversed();
       } catch { return []; }
     }),
   ];

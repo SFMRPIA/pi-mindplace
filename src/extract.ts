@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import Parser from "tree-sitter";
@@ -974,24 +974,27 @@ function extractFile(filePath: string, root: string): ExtractionResult {
 function resolveModulePath(fromFile: string, modPath: string, root: string): string | null {
   if (!modPath.startsWith(".")) return null;
 
-  // Normalize the base directory of the importing file
-  const fromDir = fromFile.includes("/") ? fromFile.slice(0, fromFile.lastIndexOf("/")) : ".";
-  // Join and clean: "src" + "./auth.ts" → "src/auth.ts"
-  let resolved = fromDir === "." ? modPath.replace(/^\.\//, "") : `${fromDir}/${modPath.replace(/^\.\//, "")}`;
-  // Normalize
-  resolved = resolved.replace(/\/\.\//g, "/");
+  // node:path handles both separators. `detect()` returns platform-native
+  // paths ("src\\auth.ts" on Windows), so slicing on "/" produced baseDir="."
+  // and probed the project root instead of the importing file's directory —
+  // every relative import edge was lost on Windows.
+  const baseDir = dirname(fromFile);
 
   // If the path already has a known extension, check directly
-  const hasExt = /\.(ts|tsx|js|jsx|mts|mjs|py|go)$/.test(resolved);
-  if (hasExt && existsSync(join(root, resolved))) return resolved;
+  if (/\.(ts|tsx|js|jsx|mts|mjs|py|go)$/.test(modPath)) {
+    const direct = resolve(root, baseDir, modPath);
+    if (existsSync(direct)) return relative(root, direct);
+  }
 
   // Try known extensions
   const exts = [".ts", ".js", ".tsx", ".jsx", ".mts", ".mjs", ".py", ".go"];
   for (const ext of exts) {
-    if (existsSync(join(root, resolved + ext))) return resolved + ext;
+    const candidate = resolve(root, baseDir, modPath + ext);
+    if (existsSync(candidate)) return relative(root, candidate);
   }
   for (const ext of exts) {
-    if (existsSync(join(root, `${resolved}/index${ext}`))) return `${resolved}/index${ext}`;
+    const candidate = resolve(root, baseDir, modPath, `index${ext}`);
+    if (existsSync(candidate)) return relative(root, candidate);
   }
   return null;
 }

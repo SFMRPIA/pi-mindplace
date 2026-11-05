@@ -40,6 +40,13 @@ describe("extract", () => {
 
     const importEdges = result.edges.filter(e => e.relation === "imports");
     assert.ok(importEdges.length > 0, "should extract import edges");
+
+    // The resolved module path must use the same separators as detect()'s file
+    // paths, or nodeId() matches no node and the edge is silently dropped.
+    const ids = new Set(result.nodes.map(n => n.id));
+    for (const e of importEdges) {
+      assert.ok(ids.has(e.target), `import edge target ${e.target} must resolve to a node`);
+    }
   });
 
   it("extracts call edges for known functions", () => {
